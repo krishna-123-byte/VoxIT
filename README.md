@@ -58,6 +58,30 @@ Small models typically require approximately 300 MB of runtime memory. English a
 
 Transcripts remain in memory and are not saved by default. Likely OTPs, PINs, CVVs, passwords, card/account numbers, and phone numbers are redacted before transcript display and scam evidence. Complete transcript content is never written to Logcat.
 
+## Phase 3: Live Protection
+
+Live Protection is an explicitly user-started ambient-microphone feature. After an in-app explanation, VoxIT requests microphone permission and starts `LiveProtectionService` as a non-sticky microphone foreground service. A persistent notification provides Open, Pause/Resume, and Stop actions. Nothing starts at install time, app launch, reboot, or after a forced stop.
+
+One `AudioRecord` instance captures mono PCM16 at 16 kHz when available, with 48 kHz and 44.1 kHz fallbacks resampled to 16 kHz. Frames enter an eight-item drop-oldest channel, then fan out to a two-second PCM ring buffer, a throttled 120-point waveform, speech detection, audio-quality measurements, the already installed Vosk recognizer, and rolling transcript-risk rules. Captured PCM is never written to disk. Stopping clears PCM, partial/final transcript, waveform, and risk state.
+
+Rolling scam risk uses only confirmed, redacted Vosk segments from the most recent 60 seconds. Old evidence expires, so risk can fall; time alone never raises it. Alerts require at least 1.5 seconds of usable speech, adequate quality, a configured score threshold, confirmed supporting evidence, and a 30-second cooldown. Manipulation remains unavailable and speaker verification remains unconfigured.
+
+The optional VoxIT overlay uses `TYPE_APPLICATION_OVERLAY`, requires a separate explicit Android settings grant, and is never required for monitoring. It is draggable and exposes Open, Stop, and Hide actions. The foreground notification remains the fallback when overlay access is denied or revoked.
+
+### Phase 3 permissions
+
+- `RECORD_AUDIO`: requested only after Start Live Protection and an explanation
+- `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MICROPHONE`: required for the visible microphone service
+- `POST_NOTIFICATIONS`: requested contextually on Android 13+; denial does not create fake results
+- `VIBRATE`: used only when vibration is enabled and an alert passes gating
+- `SYSTEM_ALERT_WINDOW`: used only after the user separately enables the optional bubble
+
+VoxIT does not request contacts, phone state, call logs, SMS, AccessibilityService access, `CAPTURE_AUDIO_OUTPUT`, broad storage access, or default-dialer privileges.
+
+### Live audio limitation
+
+A standard application cannot reliably capture protected cellular or VoIP call audio. During such calls Android may provide silence, limited ambient microphone input, or no usable input. VoxIT reports **Call audio unavailable or blocked by Android** after repeated zero buffers and does not treat absent audio or transcription as low risk. Ambient speech and audio played from another device are the supported inputs; speakerphone-call behavior is device-dependent and experimental, and VoxIT never claims both call participants were captured.
+
 ## Run
 
 Open the project in Android Studio, sync Gradle, select an emulator/device running Android 8.0 (API 26) or newer, and run the `app` configuration. From a terminal:
@@ -68,10 +92,10 @@ Open the project in Android Studio, sync Gradle, select an emulator/device runni
 
 ## Privacy and Android limitations
 
-The app requests no microphone, overlay, call-log, contacts, SMS, phone-state, accessibility, or broad storage permission. Audio and model selection use Android's Storage Access Framework. Live Protection does not begin microphone capture. No real transcript or transcript-derived score is generated when a real model is unavailable.
+The app declares microphone and foreground-service permissions for explicitly started Live Protection, notification permission for its contextual foreground status, and overlay permission for the separately enabled optional bubble. It does not request these permissions at startup. Audio and model selection use Android's Storage Access Framework. The app requests no call-log, contacts, SMS, phone-state, accessibility, protected-audio-capture, or broad storage permission. No real transcript or transcript-derived score is generated when a real model is unavailable.
 
-A standard Android app cannot directly access protected cellular-call audio. A future microphone-based experience will work best with speakerphone enabled and must be started explicitly by the user.
+A standard Android app cannot directly access protected cellular-call audio. Live Protection analyses only the microphone input Android actually supplies and must be started explicitly by the user.
 
 ## Planned phases
 
-Phase 3 should implement explicitly started microphone capture, a foreground processing service, real-time buffering, and live VAD/transcription permission flows. A later phase can integrate validated voice-integrity and speaker-verification models. Those future detectors must be calibrated with representative evaluation data before they expose risk scores.
+Phase 4 should focus on validated voice-integrity research and optional speaker enrollment/verification, including representative evaluation data, calibration, model provenance, battery/thermal profiling, and physical-device call-routing tests. No manipulation or speaker-mismatch score should be exposed until those detectors are scientifically validated.

@@ -42,17 +42,27 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.voxit.app.domain.*
+import com.voxit.app.live.LiveProtectionService
+import com.voxit.app.live.LiveProtectionStore
+import com.voxit.app.live.LiveProtectionViewModel
 import com.voxit.app.ui.theme.*
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    private var openLiveProtection by mutableStateOf(false)
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        openLiveProtection = intent?.action == LiveProtectionService.ACTION_OPEN
         enableEdgeToEdge()
-        setContent { VoxITTheme { VoxITApp() } }
+        setContent { VoxITTheme { VoxITApp(openLiveProtection, onOpenLiveHandled = { openLiveProtection = false }) } }
     }
+
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.action == LiveProtectionService.ACTION_OPEN) { openLiveProtection = true; LiveProtectionStore.requestOpenLive() } }
+    override fun onStart() { super.onStart(); LiveProtectionStore.appVisible = true }
+    override fun onStop() { LiveProtectionStore.appVisible = false; super.onStop() }
 }
 
 private object Route { const val Splash="splash"; const val Onboarding="onboarding"; const val Home="home"; const val Upload="upload"; const val RealResult="real-result"; const val Live="live"; const val Demo="demo"; const val Result="result"; const val Transcript="transcript"; const val History="history"; const val Privacy="privacy"; const val Settings="settings" }
@@ -60,17 +70,40 @@ private object Route { const val Splash="splash"; const val Onboarding="onboardi
 private class VoxViewModel : ViewModel() {
     var demoMode by mutableStateOf(false); var selectedScenario by mutableStateOf(DemoScenario.scenarios.first()); var selectedFile by mutableStateOf<FileInfo?>(null)
     var notificationEnabled by mutableStateOf(true); var vibrationEnabled by mutableStateOf(true); var bubbleEnabled by mutableStateOf(false); var saveTranscript by mutableStateOf(false); var alertThreshold by mutableIntStateOf(70)
+    var preferredLanguage by mutableStateOf("Auto / Hinglish")
     fun selectFile(context: Context, uri: Uri) { selectedFile = context.fileInfo(uri) }
 }
 
-@Composable private fun VoxITApp(vm: VoxViewModel = viewModel { VoxViewModel() }) {
+@Composable private fun VoxITApp(openLiveProtection: Boolean = false, onOpenLiveHandled: () -> Unit = {}, vm: VoxViewModel = viewModel { VoxViewModel() }) {
     val nav = rememberNavController()
-    val applicationContext = LocalContext.current.applicationContext
+    val context = LocalContext.current
+    val applicationContext = context.applicationContext
     val phase2ViewModel: com.voxit.app.phase2.Phase2ViewModel = viewModel { com.voxit.app.phase2.Phase2ViewModel(applicationContext) }
+    val liveViewModel: LiveProtectionViewModel = viewModel { LiveProtectionViewModel(applicationContext) }
+    val liveState by liveViewModel.state.collectAsState()
+    val currentRoute = nav.currentBackStackEntryAsState().value?.destination?.route
+    var globalAlertShown by rememberSaveable { mutableLongStateOf(0L) }
+    LaunchedEffect(openLiveProtection) { if (openLiveProtection) { nav.navigate(Route.Live) { launchSingleTop = true }; onOpenLiveHandled() } }
+    LaunchedEffect(Unit) { LiveProtectionStore.openLiveRequests.collect { nav.navigate(Route.Live) { launchSingleTop = true } } }
+    if (currentRoute != Route.Live && liveState.status == com.voxit.app.live.LiveSessionStatus.ALERT && liveState.alertSequence > globalAlertShown) {
+        AlertDialog(
+            onDismissRequest = { globalAlertShown = liveState.alertSequence; liveViewModel.continueMonitoring() },
+            title = { Text("Verify before sharing") },
+            text = { Text(LiveProtectionService.ALERT_TEXT) },
+            confirmButton = { Button(onClick = { globalAlertShown = liveState.alertSequence; nav.navigate(Route.Live) { launchSingleTop = true } }) { Text("Review Live Protection") } },
+            dismissButton = { Column(horizontalAlignment = Alignment.End) {
+                OutlinedButton(onClick = { globalAlertShown = liveState.alertSequence; liveViewModel.continueMonitoring() }) { Text("Continue Monitoring") }
+                OutlinedButton(onClick = { globalAlertShown = liveState.alertSequence; liveViewModel.pause() }) { Text("Pause") }
+                OutlinedButton(onClick = { globalAlertShown = liveState.alertSequence; liveViewModel.stop() }) { Text("Stop Monitoring") }
+                OutlinedButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL)) }) { Text("Verify Caller") }
+                OutlinedButton(onClick = { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SOUND_SETTINGS)) }) { Text("Open Phone Controls") }
+            } },
+        )
+    }
     NavHost(navController = nav, startDestination = Route.Splash) {
         composable(Route.Splash) { SplashScreen { nav.navigate(Route.Onboarding) { popUpTo(Route.Splash) { inclusive=true } } } }
         composable(Route.Onboarding) { OnboardingScreen({ nav.navigate(Route.Home) { popUpTo(Route.Onboarding) { inclusive=true } } }, { nav.navigate(Route.Privacy) }, { nav.navigate(Route.Home) { popUpTo(Route.Onboarding) { inclusive=true } } }) }
-        composable(Route.Home) { HomeScreen(vm, nav) }; composable(Route.Upload) { Phase2UploadScreen(phase2ViewModel, { nav.popBackStack() }, { nav.navigate(Route.RealResult) }) }; composable(Route.RealResult) { Phase2RealResultScreen(phase2ViewModel) { nav.popBackStack() } }; composable(Route.Live) { LiveScreen(vm, nav) }; composable(Route.Demo) { DemoScreen(vm, nav) }
+        composable(Route.Home) { HomeScreen(vm, nav) }; composable(Route.Upload) { Phase2UploadScreen(phase2ViewModel, { nav.popBackStack() }, { nav.navigate(Route.RealResult) }) }; composable(Route.RealResult) { Phase2RealResultScreen(phase2ViewModel) { nav.popBackStack() } }; composable(Route.Live) { LiveProtectionScreen(liveViewModel, { nav.popBackStack() }, { nav.navigate(Route.Upload) }, vm.bubbleEnabled, { vm.bubbleEnabled = it }, vm.notificationEnabled, vm.vibrationEnabled, vm.alertThreshold, vm.preferredLanguage) }; composable(Route.Demo) { DemoScreen(vm, nav) }
         composable(Route.Result) { ResultScreen(vm.selectedScenario, nav) }; composable(Route.Transcript) { TranscriptScreen(vm.selectedScenario, nav) }; composable(Route.History) { HistoryScreen(nav) }; composable(Route.Privacy) { PrivacyScreen(nav, phase2ViewModel) }; composable(Route.Settings) { SettingsScreen(vm, nav, phase2ViewModel) }
     }
 }
@@ -107,9 +140,9 @@ private class VoxViewModel : ViewModel() {
 
 @Composable private fun HistoryScreen(nav:NavHostController)=PageScaffold("Analysis History",nav){Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){DemoBadge();Text("Demonstration history",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold);DemoScenario.scenarios.take(3).forEachIndexed{index,scenario->val r=scenario.frames.last().risk;Card(colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant),modifier=Modifier.fillMaxWidth()){Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){Text(scenario.name,fontWeight=FontWeight.SemiBold);Text("SIMULATED • Demo call • Today, ${10+index}:2${index} • ${r.speechDurationSeconds}s",color=SignalMuted,style=MaterialTheme.typography.bodySmall);Text("${r.warningLevel.title()}  |  Manipulation ${r.manipulation}  |  Mismatch ${r.speakerMismatch}  |  Scam ${r.scamRisk}",color=riskColor(r.warningLevel));Text("Model: Demo timeline v1",color=SignalMuted,style=MaterialTheme.typography.bodySmall)}}};InfoPanel("Real analysis history will appear here when on-device models are integrated.")}}
 
-@Composable private fun PrivacyScreen(nav:NavHostController,phase2ViewModel:com.voxit.app.phase2.Phase2ViewModel)=PageScaffold("Privacy Centre",nav){Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){Text("Your audio deserves restraint.",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold);PrivacyPoint("Local by default","Planned processing stays on this device unless you explicitly choose otherwise.");PrivacyPoint("No silent recording","Live Protection is always explicitly started by you.");PrivacyPoint("No raw call audio","Raw live-call audio is not saved by default.");PrivacyPoint("Transcript control","Transcripts are not saved without your permission.");PrivacyPoint("Permissions","No microphone or broad storage permission is requested at startup.");PrivacyPoint("Model storage","Imported transcription models stay in app-private storage and can be deleted below.");ModelManagementPanel(phase2ViewModel);InfoPanel("App limitation: protected cellular-call audio cannot be accessed directly by a normal Android app.",Amber);OutlinedButton(onClick={},modifier=Modifier.fillMaxWidth().height(50.dp)){Text("Manage permissions")};Button(onClick={phase2ViewModel.reset()},modifier=Modifier.fillMaxWidth().height(50.dp)){Text("Delete All Session Data")}}}
+@Composable private fun PrivacyScreen(nav:NavHostController,phase2ViewModel:com.voxit.app.phase2.Phase2ViewModel)=PageScaffold("Privacy Centre",nav){Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){Text("Your audio deserves restraint.",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold);PrivacyPoint("Local by default","Uploaded and explicitly started live processing stays on this device.");PrivacyPoint("No silent recording","Live Protection starts only after you tap Start and grant microphone access. A foreground notification and microphone indicator remain visible.");PrivacyPoint("No raw live-audio storage","PCM stays in a bounded memory buffer, is never written to disk or uploaded, and is cleared when the session stops.");PrivacyPoint("Transcript control","Live transcripts are not saved or uploaded. Temporary transcript and risk state is deleted on Stop.");PrivacyPoint("Contextual permissions","Microphone and notification permissions are requested only when starting Live Protection. Overlay permission is requested separately only for the optional bubble.");PrivacyPoint("Android limitation","Protected cellular and VoIP call audio may be silent, blocked, or limited. VoxIT cannot claim both participants were captured. Speakerphone support is device-dependent and experimental.");PrivacyPoint("Model storage","Imported transcription models stay in app-private storage and can be deleted below.");ModelManagementPanel(phase2ViewModel);InfoPanel("No automatic call detection, AccessibilityService, call-log, SMS, contacts, hidden monitoring, call control, or audio upload is used.",Amber);Button(onClick={phase2ViewModel.reset()},modifier=Modifier.fillMaxWidth().height(50.dp)){Text("Delete Uploaded-Audio Session Data")}}}
 
-@Composable private fun SettingsScreen(vm:VoxViewModel,nav:NavHostController,phase2ViewModel:com.voxit.app.phase2.Phase2ViewModel)=PageScaffold("Settings",nav){Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){ToggleRow("Demo Mode","Show simulation affordances on Home",vm.demoMode){vm.demoMode=it};ToggleRow("Notifications","Notify when future detection engines flag risk",vm.notificationEnabled){vm.notificationEnabled=it};ToggleRow("Vibration","Vibrate for future high-risk warnings",vm.vibrationEnabled){vm.vibrationEnabled=it};ToggleRow("Floating bubble","Show status when a future live session is running",vm.bubbleEnabled){vm.bubbleEnabled=it};ToggleRow("Save transcript","Off by default. Real transcripts remain in memory only.",vm.saveTranscript){vm.saveTranscript=it};SectionTitle("Alert threshold: ${vm.alertThreshold}");Slider(value=vm.alertThreshold.toFloat(),onValueChange={vm.alertThreshold=it.toInt()},valueRange=35f..90f);SectionTitle("Preferred transcription language");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){FilterChip(selected=true,onClick={},label={Text("Auto / mixed")});FilterChip(selected=false,onClick={},label={Text("English")});FilterChip(selected=false,onClick={},label={Text("Hindi")})};ModelManagementPanel(phase2ViewModel);HorizontalDivider(color=SignalMuted.copy(.3f));CompactAction("Privacy settings"){nav.navigate(Route.Privacy)};CompactAction("Model information"){};CompactAction("App limitations"){nav.navigate(Route.Privacy)};Button(onClick={phase2ViewModel.reset()},modifier=Modifier.fillMaxWidth().height(50.dp)){Text("Delete all session data")}}}
+@Composable private fun SettingsScreen(vm:VoxViewModel,nav:NavHostController,phase2ViewModel:com.voxit.app.phase2.Phase2ViewModel)=PageScaffold("Settings",nav){Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){ToggleRow("Demo Mode","Show simulation affordances on Home",vm.demoMode){vm.demoMode=it};ToggleRow("Notifications","Allow contextual alert notifications; the foreground-service status remains required",vm.notificationEnabled){vm.notificationEnabled=it};ToggleRow("Vibration","Vibrate only for gated live conversation warnings",vm.vibrationEnabled){vm.vibrationEnabled=it};ToggleRow("Floating bubble preference","Ask for separate overlay permission when Live Protection starts",vm.bubbleEnabled){vm.bubbleEnabled=it};ToggleRow("Save transcript","Off by default. Phase 3 live transcripts are temporary only.",vm.saveTranscript){vm.saveTranscript=false};SectionTitle("Alert threshold: ${vm.alertThreshold}");Slider(value=vm.alertThreshold.toFloat(),onValueChange={vm.alertThreshold=it.toInt()},valueRange=35f..90f);SectionTitle("Preferred transcription language");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("Auto / Hinglish","English","Hindi").forEach{language->FilterChip(selected=vm.preferredLanguage==language,onClick={vm.preferredLanguage=language},label={Text(language)})}};ModelManagementPanel(phase2ViewModel);HorizontalDivider(color=SignalMuted.copy(.3f));CompactAction("Privacy settings"){nav.navigate(Route.Privacy)};CompactAction("Model information"){nav.navigate(Route.Upload)};CompactAction("App limitations"){nav.navigate(Route.Privacy)};Button(onClick={phase2ViewModel.reset()},modifier=Modifier.fillMaxWidth().height(50.dp)){Text("Delete uploaded-audio session data")}}}
 
 @OptIn(ExperimentalMaterial3Api::class) @Composable private fun PageScaffold(title:String,nav:NavHostController?,content: @Composable () -> Unit)=Scaffold(containerColor=Navy,topBar={if(nav!=null)CenterAlignedTopAppBar(title={Text(title,color=Mist,fontWeight=FontWeight.SemiBold)},navigationIcon={OutlinedButton(onClick={nav.popBackStack()},modifier=Modifier.padding(start=8.dp)){Text("Back")}},colors=TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor=Navy))}){padding->Box(Modifier.padding(padding)){content()}}
 
