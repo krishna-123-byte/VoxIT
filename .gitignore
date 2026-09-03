@@ -1,0 +1,78 @@
+# Local Android and Gradle state
+local.properties
+.gradle/
+.kotlin/
+**/build/
+out/
+
+# Android Studio and operating-system metadata
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Generated application packages
+*.apk
+*.aab
+*.apks
+
+# Signing keys and signing configuration
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+secrets.properties
+google-services.json
+service-account*.json
+
+# Emulator and device-specific files
+.android/
+*.avd/
+emulator-data/
+
+# Temporary or captured audio and transcripts
+recordings/
+temp-audio/
+temp_audio/
+.audio-cache/
+transcripts/
+transcript-*.json
+*.transcript.json
+*.pcm
+*.rawaudio
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+*.amr
+*.3gp
+!app/src/main/res/raw/**
+
+# Downloaded speech and machine-learning model artifacts
+models/downloaded/
+downloaded-models/
+*.tflite
+*.onnx
+*.ort
+*.pt
+*.pth
+*.gguf
+*.safetensors
+*.task
+
+# General temporary files
+*.tmp
+*.temp
+*.log
+*~
