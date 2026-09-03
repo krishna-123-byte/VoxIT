@@ -5,7 +5,9 @@ interface AudioPreprocessor
 interface SpeechActivityDetector
 interface AudioFeatureExtractor
 interface VoiceIntegrityEngine { suspend fun analyse(source: AudioSource): AnalysisSession }
-interface TranscriptionEngine { suspend fun transcribe(source: AudioSource): List<TranscriptSegment> }
+interface TranscriptionEngine {
+    suspend fun transcribe(samples: FloatArray, sampleRate: Int, language: String): TranscriptionOutput
+}
 interface SpeakerVerificationEngine
 interface ConversationRiskEngine
 interface RiskFusionEngine
@@ -27,5 +29,6 @@ class DemoVoiceIntegrityEngine : VoiceIntegrityEngine {
 }
 
 class DemoTranscriptionEngine : TranscriptionEngine {
-    override suspend fun transcribe(source: AudioSource) = emptyList<TranscriptSegment>()
+    override suspend fun transcribe(samples: FloatArray, sampleRate: Int, language: String) =
+        TranscriptionOutput.Unavailable("Select a Demo Mode scenario for simulated transcription.")
 }

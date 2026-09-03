@@ -34,7 +34,19 @@ data class TranscriptSegment(
     val language: String,
     val confirmed: Boolean = false,
     val suspicious: Boolean = false,
+    val startMs: Long = 0,
+    val endMs: Long = 0,
 )
+
+sealed interface TranscriptionOutput {
+    data class Available(
+        val segments: List<TranscriptSegment>,
+        val modelName: String,
+        val modelVersion: String,
+    ) : TranscriptionOutput
+    data class Unavailable(val reason: String) : TranscriptionOutput
+    data class Failed(val reason: String) : TranscriptionOutput
+}
 
 data class EvidenceReason(val title: String, val detail: String)
 
