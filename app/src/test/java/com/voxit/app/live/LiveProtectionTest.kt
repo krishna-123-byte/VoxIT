@@ -2,7 +2,10 @@ package com.voxit.app.live
 
 import com.voxit.app.domain.TranscriptSegment
 import com.voxit.app.phase2.EnergySpeechActivityDetector
+import com.voxit.app.phase2.InstalledModel
+import com.voxit.app.phase2.ModelValidationStatus
 import com.voxit.app.phase2.OfflineConversationRiskEngine
+import com.voxit.app.phase2.VoskModelIdentity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -42,9 +45,9 @@ class LiveProtectionTest {
     }
 
     @Test fun newStateDoesNotCarryPreviousSessionRiskOrWaveform() {
-        val old = LiveProtectionState(sessionId = 4, waveform = listOf(LiveWaveformPoint(.8f, true)), conversationRisk = OfflineConversationRiskEngine().analyse(listOf(segment("Tell me your OTP", 1_000))))
+        val old = LiveProtectionState(sessionId = 4, waveform = listOf(LiveWaveformPoint(.8f, true)), confirmedTranscript = listOf(segment("previous session", 1_000)), partialTranscript = "partial", transcriptionModelId = "hi-model", conversationRisk = OfflineConversationRiskEngine().analyse(listOf(segment("Tell me your OTP", 1_000))))
         val fresh = LiveProtectionState(sessionId = old.sessionId + 1, status = LiveSessionStatus.PREPARING)
-        assertTrue(fresh.waveform.isEmpty()); assertNull(fresh.conversationRisk.score); assertTrue(fresh.confirmedTranscript.isEmpty())
+        assertTrue(fresh.waveform.isEmpty()); assertNull(fresh.conversationRisk.score); assertTrue(fresh.confirmedTranscript.isEmpty()); assertTrue(fresh.partialTranscript.isEmpty()); assertNull(fresh.transcriptionModelId)
     }
 
     @Test fun rollingRiskRisesAndExpiresWithoutTimeBasedInflation() {
@@ -71,7 +74,48 @@ class LiveProtectionTest {
         assertFalse(state.sourceNotice.contains("demo", true))
     }
 
+    @Test fun modelIdentitiesAreStableAndUnambiguousAcrossLanguages() {
+        val english = VoskModelIdentity.stableId("vosk-model-small-en-us-0.15", "en-US")
+        val hindi = VoskModelIdentity.stableId("vosk-model-small-hi-0.22", "hi-IN")
+        assertEquals(english, VoskModelIdentity.stableId("vosk-model-small-en-us-0.15", "en-US"))
+        assertNotEquals(english, hindi)
+        assertEquals("en-US", VoskModelIdentity.detect("vosk-model-small-en-us-0.15.zip")?.languageCode)
+        assertEquals("hi-IN", VoskModelIdentity.detect("vosk-model-small-hi-0.22.zip")?.languageCode)
+        assertNotNull(VoskModelIdentity.validateExpected("English", VoskModelIdentity.detect("vosk-model-small-hi-0.22")))
+    }
+
+    @Test fun closingOldLiveRecognizerAndModelPreventsReuseByNewSession() {
+        val hindiRuntime = FakeVoskRuntime()
+        val hindiSession = LiveVoskSession.create(installed("hi", "Hindi"), hindiRuntime)
+        assertEquals("hi", hindiSession.installedModel.id)
+        hindiSession.close()
+        assertTrue(hindiRuntime.recognizerClosed)
+        assertTrue(hindiRuntime.modelClosed)
+
+        val englishRuntime = FakeVoskRuntime()
+        val englishSession = LiveVoskSession.create(installed("en", "English"), englishRuntime)
+        assertEquals("en", englishSession.installedModel.id)
+        assertFalse(englishRuntime.recognizerClosed)
+        englishSession.close()
+        assertTrue(englishRuntime.recognizerClosed)
+        assertTrue(englishRuntime.modelClosed)
+    }
+
     private fun segment(text: String, start: Long) = TranscriptSegment("00:01", text, "English", confirmed = true, startMs = start, endMs = start + 1_000)
+    private fun installed(id: String, language: String) = InstalledModel(id, "/test/$id", "$language model", language, id, "test", "$language model", 1L, ModelValidationStatus.VALID, "vosk-models/$id")
+}
+
+private class FakeVoskRuntime : LiveVoskRuntime {
+    var modelClosed = false
+    var recognizerClosed = false
+    override fun openModel(path: String) = object : VoskModelHandle { override fun close() { modelClosed = true } }
+    override fun openRecognizer(model: VoskModelHandle, sampleRate: Float) = object : VoskRecognizerHandle {
+        override fun acceptWaveForm(bytes: ByteArray, length: Int) = false
+        override val result = "{\"text\":\"\"}"
+        override val partialResult = "{\"partial\":\"\"}"
+        override val finalResult = "{\"text\":\"\"}"
+        override fun close() { recognizerClosed = true }
+    }
 }
 
 class FakeLiveAudioSource(

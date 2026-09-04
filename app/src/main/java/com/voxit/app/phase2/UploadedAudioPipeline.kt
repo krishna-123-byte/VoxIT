@@ -15,12 +15,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class UploadedAudioPipeline(context: Context) {
+class UploadedAudioPipeline(context: Context, private val modelStore: VoskModelStore = VoskModelStore(context)) {
     private val decoder = AndroidAudioDecoder(context.contentResolver)
     private val speechDetector = EnergySpeechActivityDetector()
     private val featureExtractor = SignalFeatureExtractor()
     private val waveformDownsampler = WaveformDownsampler()
-    private val modelStore = VoskModelStore(context)
     private val transcriptionEngine = VoskTranscriptionEngine(modelStore)
     private val riskEngine = OfflineConversationRiskEngine()
 
@@ -71,8 +70,14 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     private val modelStore = VoskModelStore(applicationContext)
     private val _uiState = MutableStateFlow<Phase2UiState>(Phase2UiState.Idle)
     val uiState = _uiState.asStateFlow()
-    private val _modelState = MutableStateFlow<ModelImportState>(modelStore.installedModel()?.let { ModelImportState.Ready(it) } ?: ModelImportState.Idle)
+    private val initialModelCatalog = modelStore.catalog()
+    private val _modelState = MutableStateFlow<ModelImportState>(
+        initialModelCatalog.readySelectedModel?.let { ModelImportState.Ready(it) }
+            ?: if (initialModelCatalog.selectedModelId == null) ModelImportState.Idle else ModelImportState.Error("Selected model unavailable."),
+    )
     val modelState = _modelState.asStateFlow()
+    private val _modelCatalog = MutableStateFlow(initialModelCatalog)
+    val modelCatalog = _modelCatalog.asStateFlow()
     private var selectedAudio: SelectedAudio? = null
     private var analysisJob: Job? = null
     private var modelJob: Job? = null
@@ -118,17 +123,57 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
 
     fun importModel(uri: Uri, language: String) {
         if (modelJob?.isActive == true) return
+        if (liveSessionActive()) {
+            _modelState.value = ModelImportState.Error("Stop and restart Live Protection to apply the new transcription model.")
+            return
+        }
         modelJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val model = modelStore.importZip(uri, language) { _modelState.value = ModelImportState.Importing(it) }
                 _modelState.value = ModelImportState.Ready(model)
+                _modelCatalog.value = modelStore.catalog()
+                clearModelBoundResult()
             } catch (_: CancellationException) { _modelState.value = ModelImportState.Idle }
             catch (error: Exception) { _modelState.value = ModelImportState.Error(error.message ?: "Model import failed.") }
             finally { modelJob = null }
         }
     }
 
-    fun deleteModel() { modelJob?.cancel(); modelStore.deleteModel(); _modelState.value = ModelImportState.Idle }
+    fun selectModel(modelId: String) {
+        if (liveSessionActive()) {
+            _modelState.value = ModelImportState.Error("Stop and restart Live Protection to apply the new transcription model.")
+            return
+        }
+        val model = modelStore.selectModel(modelId)
+        _modelCatalog.value = modelStore.catalog()
+        _modelState.value = model?.let { ModelImportState.Ready(it) } ?: ModelImportState.Error("Selected model unavailable.")
+        if (model != null) {
+            preferredLanguage = model.language
+            clearModelBoundResult()
+        }
+    }
+
+    fun refreshModels() {
+        val catalog = modelStore.catalog()
+        val ready = catalog.readySelectedModel
+        _modelCatalog.value = catalog
+        _modelState.value = when {
+            catalog.selectedModelId == null -> ModelImportState.Idle
+            ready != null -> ModelImportState.Ready(ready)
+            else -> ModelImportState.Error("Selected model unavailable.")
+        }
+    }
+
+    fun deleteModel() {
+        if (liveSessionActive()) {
+            _modelState.value = ModelImportState.Error("Stop Live Protection before deleting its transcription model.")
+            return
+        }
+        modelJob?.cancel()
+        modelStore.deleteModel()
+        refreshModels()
+        clearModelBoundResult()
+    }
     fun deleteTranscript() {
         val current = when (val state = _uiState.value) { is Phase2UiState.Complete -> state.result; is Phase2UiState.ModelRequired -> state.result; else -> null } ?: return
         val cleared = current.copy(transcript = emptyList(), conversationRisk = ConversationRiskResult(null, emptyList(), "Transcript deleted; conversation-risk output removed."), transcriptSaved = false)
@@ -136,4 +181,36 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     }
 
     override fun onCleared() { cancelAnalysis(setCancelled = false); modelJob?.cancel(); super.onCleared() }
+
+    private fun liveSessionActive(): Boolean {
+        val state = com.voxit.app.live.LiveProtectionStore.state.value
+        return state.microphoneActive || state.status in setOf(
+            com.voxit.app.live.LiveSessionStatus.PREPARING,
+            com.voxit.app.live.LiveSessionStatus.STARTING_SERVICE,
+            com.voxit.app.live.LiveSessionStatus.LISTENING,
+            com.voxit.app.live.LiveSessionStatus.COLLECTING_SPEECH,
+            com.voxit.app.live.LiveSessionStatus.TRANSCRIBING,
+            com.voxit.app.live.LiveSessionStatus.PAUSED,
+            com.voxit.app.live.LiveSessionStatus.LOW_QUALITY,
+            com.voxit.app.live.LiveSessionStatus.AUDIO_BLOCKED,
+            com.voxit.app.live.LiveSessionStatus.ALERT,
+        )
+    }
+
+    private fun clearModelBoundResult() {
+        val current = when (val state = _uiState.value) {
+            is Phase2UiState.Complete -> state.result
+            is Phase2UiState.ModelRequired -> state.result
+            else -> null
+        } ?: return
+        _uiState.value = Phase2UiState.ModelRequired(
+            current.copy(
+                transcript = emptyList(),
+                conversationRisk = ConversationRiskResult(null, emptyList(), "Transcription model changed. Analyse again to create new real transcript evidence."),
+                transcriptionModel = null,
+                transcriptionVersion = null,
+                transcriptionMessage = "Transcription model changed. Previous transcript and transcript-risk state were cleared.",
+            ),
+        )
+    }
 }

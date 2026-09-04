@@ -39,7 +39,10 @@ class LiveProtectionInstrumentedTest {
     }
 
     @Test fun missingLiveModelIsReportedWithoutDemoFallback() {
-        val installed = VoskModelStore(context).installedModel()
+        val root = java.io.File(context.cacheDir, "missing-live-model").apply { deleteRecursively(); mkdirs() }
+        val installed = try { VoskModelStore(context, root, "missing-live-model-test", migrateLegacy = false).installedModel() } finally {
+            root.deleteRecursively(); context.getSharedPreferences("missing-live-model-test", 0).edit().clear().commit()
+        }
         assertNull(installed)
         val state = LiveProtectionState(status = LiveSessionStatus.LISTENING, transcriptionStatus = "Transcription model not installed")
         assertTrue(state.transcriptionStatus.contains("not installed"))

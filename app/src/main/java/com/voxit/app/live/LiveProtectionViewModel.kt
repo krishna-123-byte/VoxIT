@@ -21,7 +21,7 @@ class LiveProtectionViewModel(private val context: Context) : ViewModel() {
             putExtra(LiveProtectionService.EXTRA_ALERT_NOTIFICATIONS, options.alertNotificationsEnabled)
             putExtra(LiveProtectionService.EXTRA_VIBRATION, options.vibrationEnabled)
             putExtra(LiveProtectionService.EXTRA_THRESHOLD, options.alertThreshold)
-            putExtra(LiveProtectionService.EXTRA_LANGUAGE, options.preferredLanguage)
+            putExtra(LiveProtectionService.EXTRA_MODEL_ID, options.selectedModelId)
         })
     }
 

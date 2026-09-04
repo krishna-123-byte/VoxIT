@@ -47,7 +47,9 @@ Cancellation invalidates the active session and releases streams, descriptors, e
 
 VoxIT uses [Vosk Android](https://github.com/alphacep/vosk-api) `0.3.75`, an Apache-2.0 offline speech-recognition runtime distributed through Maven Central. It supports Android API 21+, including ARM64. Vosk word results provide timestamps used to build confirmed transcript segments.
 
-No model binary is bundled or committed. Import a model ZIP through **Upload Recording → Import Model ZIP**; VoxIT validates the archive, blocks path traversal and oversized extraction, and stores the model under app-private storage. Settings and Privacy Centre can delete it.
+No model binary is bundled or committed. Import a model ZIP through **Upload Recording → Import Model ZIP**; VoxIT validates the archive, blocks path traversal and oversized extraction, and stores each model in a separate app-private directory. Each model has a stable ID, detected language, original archive name, import time, validation state, and non-sensitive private path identifier. Settings, Upload Recording, and Privacy Centre show the exact selected model.
+
+The selected model ID is persisted and shared by uploaded-audio and Live Protection transcription. A new live session receives that exact ID, validates its directory, and creates a new Vosk model and recognizer. Stop closes both objects and clears partial/final transcript and transcript-risk state. Switching is blocked while Live Protection is active; stop it before selecting another model. A deleted, corrupt, or missing selection reports **Selected model unavailable** and never falls back to a different model or Demo Mode. Legacy single-directory installations are migrated without trusting a conflicting language label; known archive names and the model README are used to recover actual language identity.
 
 Suggested Apache-2.0 mobile models from the [official Vosk model list](https://alphacephei.com/vosk/models):
 

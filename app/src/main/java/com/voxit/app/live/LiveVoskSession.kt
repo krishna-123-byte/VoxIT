@@ -4,7 +4,6 @@ import com.voxit.app.domain.TranscriptSegment
 import com.voxit.app.phase2.AudioLimits
 import com.voxit.app.phase2.InstalledModel
 import com.voxit.app.phase2.SensitiveDataRedactor
-import com.voxit.app.phase2.VoskModelStore
 import com.voxit.app.phase2.formatTime
 import org.json.JSONObject
 import org.vosk.Model
@@ -15,39 +14,70 @@ import java.nio.ByteOrder
 
 data class LiveTranscriptionUpdate(val partial: String = "", val finalSegment: TranscriptSegment? = null)
 
+interface VoskModelHandle : Closeable
+
+interface VoskRecognizerHandle : Closeable {
+    fun acceptWaveForm(bytes: ByteArray, length: Int): Boolean
+    val result: String
+    val partialResult: String
+    val finalResult: String
+}
+
+interface LiveVoskRuntime {
+    fun openModel(path: String): VoskModelHandle
+    fun openRecognizer(model: VoskModelHandle, sampleRate: Float): VoskRecognizerHandle
+}
+
+object AndroidLiveVoskRuntime : LiveVoskRuntime {
+    private class AndroidModel(val delegate: Model) : VoskModelHandle { override fun close() = delegate.close() }
+    private class AndroidRecognizer(private val delegate: Recognizer) : VoskRecognizerHandle {
+        override fun acceptWaveForm(bytes: ByteArray, length: Int) = delegate.acceptWaveForm(bytes, length)
+        override val result: String get() = delegate.result
+        override val partialResult: String get() = delegate.partialResult
+        override val finalResult: String get() = delegate.finalResult
+        override fun close() = delegate.close()
+    }
+
+    override fun openModel(path: String): VoskModelHandle = AndroidModel(Model(path))
+    override fun openRecognizer(model: VoskModelHandle, sampleRate: Float): VoskRecognizerHandle {
+        val androidModel = model as? AndroidModel ?: error("Incompatible Vosk model handle")
+        return AndroidRecognizer(Recognizer(androidModel.delegate, sampleRate).also { it.setWords(true) })
+    }
+}
+
 class LiveVoskSession private constructor(
-    private val installed: InstalledModel,
-    private val model: Model,
-    private val recognizer: Recognizer,
+    val installedModel: InstalledModel,
+    private val model: VoskModelHandle,
+    private val recognizer: VoskRecognizerHandle,
 ) : Closeable {
-    val modelLabel: String get() = "${installed.displayName} • ${installed.language}"
+    val modelLabel: String get() = "${installedModel.displayName} • ${installedModel.language}"
+    private var closed = false
 
     fun accept(samples: FloatArray): LiveTranscriptionUpdate {
+        check(!closed) { "Recognizer is closed" }
         val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
         samples.forEach { pcm.putShort((it.coerceIn(-1f, 1f) * 32767f).toInt().toShort()) }
         return if (recognizer.acceptWaveForm(pcm.array(), pcm.position())) {
             LiveTranscriptionUpdate(finalSegment = parseFinal(recognizer.result))
         } else {
-            val partial = LiveVoskResultParser.partial(recognizer.partialResult)
-            LiveTranscriptionUpdate(partial = partial)
+            LiveTranscriptionUpdate(partial = LiveVoskResultParser.partial(recognizer.partialResult))
         }
     }
 
-    fun finish(): TranscriptSegment? = parseFinal(recognizer.finalResult)
+    fun finish(): TranscriptSegment? = if (closed) null else parseFinal(recognizer.finalResult)
+    private fun parseFinal(json: String) = LiveVoskResultParser.final(json, installedModel.language)
 
-    private fun parseFinal(json: String): TranscriptSegment? {
-        return LiveVoskResultParser.final(json, installed.language)
+    override fun close() {
+        if (closed) return
+        closed = true
+        try { recognizer.close() } finally { model.close() }
     }
 
-    override fun close() { try { recognizer.close() } finally { model.close() } }
-
     companion object {
-        fun create(store: VoskModelStore): LiveVoskSession? {
-            val installed = store.installedModel() ?: return null
-            val model = Model(installed.directory)
+        fun create(installed: InstalledModel, runtime: LiveVoskRuntime = AndroidLiveVoskRuntime): LiveVoskSession {
+            val model = runtime.openModel(installed.directory)
             return try {
-                val recognizer = Recognizer(model, AudioLimits.TARGET_SAMPLE_RATE.toFloat()).also { it.setWords(true) }
-                LiveVoskSession(installed, model, recognizer)
+                LiveVoskSession(installed, model, runtime.openRecognizer(model, AudioLimits.TARGET_SAMPLE_RATE.toFloat()))
             } catch (error: Exception) {
                 model.close()
                 throw error

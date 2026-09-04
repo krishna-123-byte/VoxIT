@@ -53,7 +53,7 @@ class LiveProtectionService : Service() {
     private var sessionStartedAt = 0L
     private var pausedStartedAt = 0L
     private var totalPausedMs = 0L
-    private var options = LiveStartOptions(false, true, false, 70, "Auto / Hinglish")
+    private var options = LiveStartOptions(false, true, false, 70, null)
     private var alertGate = AlertGate(70)
 
     override fun onCreate() {
@@ -81,7 +81,7 @@ class LiveProtectionService : Service() {
             alertNotificationsEnabled = intent.getBooleanExtra(EXTRA_ALERT_NOTIFICATIONS, true),
             vibrationEnabled = intent.getBooleanExtra(EXTRA_VIBRATION, false),
             alertThreshold = intent.getIntExtra(EXTRA_THRESHOLD, 70).coerceIn(35, 100),
-            preferredLanguage = intent.getStringExtra(EXTRA_LANGUAGE) ?: "Auto / Hinglish",
+            selectedModelId = intent.getStringExtra(EXTRA_MODEL_ID),
         )
         alertGate = AlertGate(options.alertThreshold)
         val sessionId = SystemClock.elapsedRealtime()
@@ -143,11 +143,31 @@ class LiveProtectionService : Service() {
         var usableSpeechMs = 0L
         var lastUiUpdate = 0L
         var lastSpeechUpdate = 0L
-        transcriber = try { LiveVoskSession.create(VoskModelStore(applicationContext)) } catch (_: Exception) { null }
+        try { transcriber?.close() } catch (_: Exception) { }
+        transcriber = null
+        val modelStore = VoskModelStore(applicationContext)
+        val requestedModelId = options.selectedModelId
+        val selectedModel = requestedModelId?.let(modelStore::resolve)
+        var modelLoadError: String? = null
+        if (requestedModelId != null && selectedModel == null) modelLoadError = "Selected model unavailable."
+        transcriber = if (selectedModel == null) null else try {
+            LiveVoskSession.create(selectedModel)
+        } catch (_: Exception) {
+            modelLoadError = "Selected model unavailable."
+            null
+        }
         LiveProtectionStore.update {
+            val loaded = transcriber?.installedModel
             it.copy(
-                transcriptionModel = transcriber?.modelLabel,
-                transcriptionStatus = transcriber?.let { session -> "Live offline transcription ready: ${session.modelLabel}" } ?: "Transcription model not installed",
+                transcriptionModelId = loaded?.id,
+                transcriptionModel = loaded?.displayName,
+                transcriptionLanguage = loaded?.language,
+                transcriptionPathIdentifier = loaded?.pathIdentifier,
+                transcriptionStatus = when {
+                    loaded != null -> "Live offline transcription ready: ${loaded.displayName} • ${loaded.language}"
+                    modelLoadError != null -> modelLoadError!!
+                    else -> "Transcription model not installed"
+                },
             )
         }
         try {
@@ -344,7 +364,7 @@ class LiveProtectionService : Service() {
         const val EXTRA_ALERT_NOTIFICATIONS = "alert_notifications"
         const val EXTRA_VIBRATION = "vibration"
         const val EXTRA_THRESHOLD = "threshold"
-        const val EXTRA_LANGUAGE = "language"
+        const val EXTRA_MODEL_ID = "model_id"
         private const val CHANNEL_ID = "voxit_live_protection"
         private const val NOTIFICATION_ID = 3107
         const val ALERT_TEXT = "Suspicious conversation patterns were detected. This is a warning, not proof. Do not share OTPs, PINs, passwords or payment details. Verify the caller through an official number."

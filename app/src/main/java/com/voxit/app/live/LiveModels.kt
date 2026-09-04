@@ -30,7 +30,10 @@ data class LiveProtectionState(
     val partialTranscript: String = "",
     val confirmedTranscript: List<TranscriptSegment> = emptyList(),
     val conversationRisk: ConversationRiskResult = ConversationRiskResult(null, emptyList(), "No confirmed transcript is available."),
+    val transcriptionModelId: String? = null,
     val transcriptionModel: String? = null,
+    val transcriptionLanguage: String? = null,
+    val transcriptionPathIdentifier: String? = null,
     val transcriptionStatus: String = "Transcription model not installed",
     val bubbleStatus: BubbleStatus = BubbleStatus.DISABLED,
     val alertSequence: Long = 0,
@@ -43,7 +46,7 @@ data class LiveStartOptions(
     val alertNotificationsEnabled: Boolean,
     val vibrationEnabled: Boolean,
     val alertThreshold: Int,
-    val preferredLanguage: String,
+    val selectedModelId: String?,
 )
 
 interface LiveAudioSource {

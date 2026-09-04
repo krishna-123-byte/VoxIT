@@ -121,11 +121,28 @@ sealed interface Phase2UiState {
 }
 
 data class InstalledModel(
+    val id: String,
     val directory: String,
     val displayName: String,
     val language: String,
+    val languageCode: String,
     val version: String,
+    val originalName: String,
+    val importedAtEpochMs: Long,
+    val validationStatus: ModelValidationStatus,
+    val pathIdentifier: String,
 )
+
+enum class ModelValidationStatus { VALID, MISSING, INVALID }
+
+data class ModelCatalog(
+    val models: List<InstalledModel> = emptyList(),
+    val selectedModelId: String? = null,
+    val selectedModel: InstalledModel? = null,
+) {
+    val readySelectedModel: InstalledModel?
+        get() = selectedModel?.takeIf { it.validationStatus == ModelValidationStatus.VALID }
+}
 
 sealed interface ModelImportState {
     data object Idle : ModelImportState

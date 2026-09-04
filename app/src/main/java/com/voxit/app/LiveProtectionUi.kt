@@ -44,7 +44,7 @@ fun LiveProtectionScreen(
     alertNotificationsEnabled: Boolean,
     vibrationEnabled: Boolean,
     alertThreshold: Int,
-    preferredLanguage: String,
+    selectedModelId: String?,
 ) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
@@ -56,7 +56,7 @@ fun LiveProtectionScreen(
     var permissionNote by rememberSaveable { mutableStateOf<String?>(null) }
     var lastAlertShown by rememberSaveable { mutableLongStateOf(0L) }
 
-    fun options(useBubble: Boolean) = LiveStartOptions(useBubble, alertNotificationsEnabled, vibrationEnabled, alertThreshold, preferredLanguage)
+    fun options(useBubble: Boolean) = LiveStartOptions(useBubble, alertNotificationsEnabled, vibrationEnabled, alertThreshold, selectedModelId)
     fun finishStartAfterOverlay() {
         if (bubblePreferred && !Settings.canDrawOverlays(context)) { overlayChoiceForStart = true; showOverlayChoice = true }
         else vm.start(options(bubblePreferred && Settings.canDrawOverlays(context)))
@@ -128,6 +128,13 @@ fun LiveProtectionScreen(
 
             Text("Live transcription", color = SignalBlue, fontWeight = FontWeight.SemiBold)
             LiveInfo(state.transcriptionStatus, if (state.transcriptionModel == null) Amber else SafeGreen)
+            state.transcriptionModel?.let { LiveDetail("Actual loaded model", it) }
+            state.transcriptionLanguage?.let { LiveDetail("Selected language", it) }
+            state.transcriptionModelId?.let { LiveDetail("Loaded model ID", it) }
+            state.transcriptionPathIdentifier?.let { LiveDetail("Private path", it) }
+            if (state.microphoneActive && selectedModelId != state.transcriptionModelId) {
+                LiveInfo("Restart Live Protection to apply the selected model.", Amber)
+            }
             if (state.partialTranscript.isNotBlank()) {
                 Text("Partial — not used for alerts", color = SignalMuted, style = MaterialTheme.typography.labelMedium)
                 Text(state.partialTranscript)

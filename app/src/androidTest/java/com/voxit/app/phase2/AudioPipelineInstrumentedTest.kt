@@ -28,7 +28,13 @@ class AudioPipelineInstrumentedTest {
             assertEquals(16_000, decoded.metadata.sampleRate)
             assertEquals(1, decoded.metadata.channelCount)
             assertEquals(48_000, decoded.monoSamples.size)
-            val result = UploadedAudioPipeline(context).analyse(selected, "English") { }
+            val modelRoot = File(context.cacheDir, "empty-pipeline-models").apply { deleteRecursively(); mkdirs() }
+            context.getSharedPreferences("empty-pipeline-models", 0).edit().clear().commit()
+            val result = try {
+                UploadedAudioPipeline(context, VoskModelStore(context, modelRoot, "empty-pipeline-models", migrateLegacy = false)).analyse(selected, "English") { }
+            } finally {
+                modelRoot.deleteRecursively(); context.getSharedPreferences("empty-pipeline-models", 0).edit().clear().commit()
+            }
             assertTrue(result.waveform.isNotEmpty())
             assertTrue(result.speechRegions.isNotEmpty())
             assertNull(result.manipulationScore)

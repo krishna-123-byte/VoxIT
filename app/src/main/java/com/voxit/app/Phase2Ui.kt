@@ -66,12 +66,13 @@ fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: ()
                 }
             }
             if (state is Phase2UiState.FileSelected) {
-                LanguageSelector(vm.preferredLanguage) { vm.preferredLanguage = it }
+                Text("Transcription uses the exact selected model shown below; changing a label cannot change recognizer language.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
                 Button(onClick = vm::analyse, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Analyse Recording") }
             }
             HorizontalDivider(color = SignalMuted.copy(.25f))
             Text("Offline transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold)
             ModelStatus(modelState)
+            ModelChooser(vm)
             Text("Import a Vosk small-model ZIP. Suggested: vosk-model-small-en-us-0.15 (~40 MB) or vosk-model-small-hi-0.22 (~42 MB). Runtime memory is approximately 300 MB.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = importLanguage == "English", onClick = { importLanguage = "English" }, label = { Text("English") }, modifier = Modifier.weight(1f))
@@ -145,9 +146,25 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
 @Composable private fun RetryActions(vm: Phase2ViewModel, picker: androidx.activity.result.ActivityResultLauncher<Array<String>>) { OutlinedButton(onClick = vm::retry, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Retry") }; OutlinedButton(onClick = { vm.reset(); picker.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Select Another File") } }
 @Composable private fun SelectedFileCard(file: SelectedAudio) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(file.name, fontWeight = FontWeight.SemiBold); Text("${file.mimeType} • ${formatBytes(file.sizeBytes)}", color = SignalMuted) } }
 @Composable private fun ResultReadyCard(result: RealAnalysisResult, message: String) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(message, fontWeight = FontWeight.SemiBold); Text("${formatDuration(result.metadata.durationMs)} • ${result.metadata.sampleRate} Hz • ${result.metadata.channelCount} channel(s)", color = SignalMuted); Text("${result.speechRegions.size} speech region(s) • ${formatDuration(result.quality.usableSpeechMs)} usable speech", color = SignalMuted) } }
-@Composable private fun LanguageSelector(selected: String, onSelect: (String) -> Unit) { Text("Transcription language", color = SignalBlue, fontWeight = FontWeight.SemiBold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Auto / Hinglish", "English", "Hindi").forEach { FilterChip(selected = selected == it, onClick = { onSelect(it) }, label = { Text(it, maxLines = 1) }, modifier = Modifier.weight(1f)) } } }
-@Composable private fun ModelStatus(state: ModelImportState) = when (state) { ModelImportState.Idle -> Phase2Info("No offline transcription model installed.", Amber); is ModelImportState.Importing -> Column { LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth()); Text("Importing and validating model… ${(state.progress * 100).roundToInt()}%", color = SignalMuted) }; is ModelImportState.Ready -> Phase2Info("Installed: ${state.model.displayName} • ${state.model.language}", SafeGreen); is ModelImportState.Error -> Phase2Info(state.message, AlertRed) }
-@Composable fun ModelManagementPanel(vm: Phase2ViewModel) { val state by vm.modelState.collectAsState(); Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Offline transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold); ModelStatus(state); if (state is ModelImportState.Ready) OutlinedButton(onClick = vm::deleteModel, modifier = Modifier.fillMaxWidth()) { Text("Delete installed model") }; Text("Models remain in app-private storage and are never uploaded.", color = SignalMuted, style = MaterialTheme.typography.bodySmall) } }
+@Composable private fun ModelStatus(state: ModelImportState) = when (state) { ModelImportState.Idle -> Phase2Info("No offline transcription model installed.", Amber); is ModelImportState.Importing -> Column { LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth()); Text("Importing and validating model… ${(state.progress * 100).roundToInt()}%", color = SignalMuted) }; is ModelImportState.Ready -> Phase2Info("Selected: ${state.model.displayName} • ${state.model.language}\nModel ID: ${state.model.id}\nPrivate path: ${state.model.pathIdentifier}", SafeGreen); is ModelImportState.Error -> Phase2Info(state.message, AlertRed) }
+
+@Composable private fun ModelChooser(vm: Phase2ViewModel) {
+    val catalog by vm.modelCatalog.collectAsState()
+    if (catalog.models.isNotEmpty()) {
+        Text("Choose the exact model used by uploaded and live transcription:", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+        catalog.models.forEach { model ->
+            FilterChip(
+                selected = catalog.selectedModelId == model.id,
+                onClick = { vm.selectModel(model.id) },
+                enabled = model.validationStatus == ModelValidationStatus.VALID,
+                label = { Text("${model.displayName} • ${model.language} • ${model.validationStatus.name.lowercase()}") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable fun ModelManagementPanel(vm: Phase2ViewModel) { val state by vm.modelState.collectAsState(); Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Offline transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold); ModelStatus(state); ModelChooser(vm); if (state is ModelImportState.Ready) OutlinedButton(onClick = vm::deleteModel, modifier = Modifier.fillMaxWidth()) { Text("Delete selected model") }; Text("Models use separate app-private directories and are never uploaded. Switching is blocked while Live Protection is active.", color = SignalMuted, style = MaterialTheme.typography.bodySmall) } }
 @Composable private fun Phase2Info(text: String, color: androidx.compose.ui.graphics.Color = SignalBlue) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Text(text, modifier = Modifier.padding(14.dp), color = color) }
 
 @Composable private fun RealWaveform(points: List<WaveformPoint>, selectedMs: Long, onSeek: (Long) -> Unit) { val maxTime = points.lastOrNull()?.timeMs?.coerceAtLeast(1) ?: 1L; Canvas(Modifier.fillMaxWidth().height(150.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).pointerInput(points) { awaitEachGesture { val down = awaitFirstDown(); onSeek((down.position.x / size.width * maxTime).toLong().coerceIn(0, maxTime)); do { val event = awaitPointerEvent(); event.changes.firstOrNull()?.let { change -> onSeek((change.position.x / size.width * maxTime).toLong().coerceIn(0, maxTime)); change.consume() } } while (event.changes.any { it.pressed }) } }.padding(10.dp)) { if (points.isNotEmpty()) { val center = size.height / 2; points.forEachIndexed { index, point -> val x = index * size.width / points.size; val height = 5f + point.amplitude * size.height * .42f; drawLine(if (point.isSpeech) SafeGreen else SignalMuted, Offset(x, center - height), Offset(x, center + height), strokeWidth = 3f, cap = StrokeCap.Round) }; val markerX = selectedMs.toFloat() / maxTime * size.width; drawLine(Amber, Offset(markerX, 0f), Offset(markerX, size.height), strokeWidth = 4f) } } }

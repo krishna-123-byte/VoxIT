@@ -14,7 +14,10 @@ import java.nio.ByteOrder
 
 class VoskTranscriptionEngine(private val modelStore: VoskModelStore) : TranscriptionEngine {
     override suspend fun transcribe(samples: FloatArray, sampleRate: Int, language: String): TranscriptionOutput {
-        val installed = modelStore.installedModel() ?: return TranscriptionOutput.Unavailable("Offline transcription model not installed.")
+        val selectedId = modelStore.selectedModelId()
+            ?: return TranscriptionOutput.Unavailable("Offline transcription model not installed.")
+        val installed = modelStore.resolve(selectedId)
+            ?: return TranscriptionOutput.Unavailable("Selected model unavailable.")
         if (sampleRate != AudioLimits.TARGET_SAMPLE_RATE) return TranscriptionOutput.Failed("Transcription requires 16 kHz mono samples.")
         var model: Model? = null; var recognizer: Recognizer? = null
         return try {
