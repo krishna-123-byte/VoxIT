@@ -27,7 +27,7 @@ The Upload Recording flow now performs real, local processing of user-selected c
 4. Detect and merge usable speech regions, calculate audio quality, create an actual downsampled waveform, and extract experimental signal information.
 5. Optionally transcribe with an imported offline Vosk model and run explainable, transcript-based scam rules.
 
-Real Mode never derives an AI voice-manipulation percentage from signal features. Voice manipulation remains **Unavailable — AI voice model not installed**, and speaker mismatch remains **Not configured**. Scam risk is available only when an actual offline transcript was produced.
+Real Mode never derives an AI voice-manipulation percentage from signal features. Voice manipulation remains unavailable unless the separately validated Phase 4 acoustic model completes inference, and speaker mismatch remains **Not configured**. Scam risk is available only when an actual offline transcript was produced.
 
 ### Processing limits
 
@@ -84,6 +84,16 @@ VoxIT does not request contacts, phone state, call logs, SMS, AccessibilityServi
 
 A standard application cannot reliably capture protected cellular or VoIP call audio. During such calls Android may provide silence, limited ambient microphone input, or no usable input. VoxIT reports **Call audio unavailable or blocked by Android** after repeated zero buffers and does not treat absent audio or transcription as low risk. Ambient speech and audio played from another device are the supported inputs; speakerphone-call behavior is device-dependent and experimental, and VoxIT never claims both call participants were captured.
 
+## Phase 4: uploaded voice integrity
+
+Uploaded recordings can optionally use the genuine AASIST-L acoustic anti-spoofing network from NAVER Clova's official MIT-licensed repository. VoxIT uses the official 85,306-parameter ASVspoof 2019 Logical Access checkpoint, reproducibly exports it to fixed-shape ONNX, and runs it locally with Microsoft's official ONNX Runtime Android package.
+
+The model is not bundled. Follow [ml/README.md](ml/README.md) to export it, then choose **Upload Recording → Import verified AASIST-L ONNX model**. Import uses Android's Storage Access Framework, limits the file to 10 MB, checks the exact SHA-256, validates `audio [1,64600]` and `logits [1,2]`, and stores it in app-private storage. A corrupt or different model is rejected rather than used or silently replaced.
+
+Analysis uses only detected speech, 64,600-sample windows with 32,300-sample overlap, official repeat-padding for shorter valid regions, at most 32 windows, and median aggregation. Class 0 softmax is displayed as an **uncalibrated experimental synthetic/spoof score**. Quality problems yield unavailable or inconclusive output rather than mechanically increasing risk. The result shows window count, agreement, confidence, runtime, model identity, and limitations separately from transcript scam risk.
+
+AASIST-L is a binary bona-fide/spoof research model trained on ASVspoof 2019 LA. It may detect artifacts from the synthetic-speech and voice-conversion systems represented there, but it cannot reliably distinguish TTS, voice conversion, or cloning subtypes; it is not a validated replay detector; and it does not verify identity or prove fraud. VoxIT has not run an accuracy dataset evaluation or calibration. See [the Phase 4 research report](docs/phase4-model-evaluation.md) and [model card](ml/model-card.md).
+
 ## Run
 
 Open the project in Android Studio, sync Gradle, select an emulator/device running Android 8.0 (API 26) or newer, and run the `app` configuration. From a terminal:
@@ -100,4 +110,4 @@ A standard Android app cannot directly access protected cellular-call audio. Liv
 
 ## Planned phases
 
-Phase 4 should focus on validated voice-integrity research and optional speaker enrollment/verification, including representative evaluation data, calibration, model provenance, battery/thermal profiling, and physical-device call-routing tests. No manipulation or speaker-mismatch score should be exposed until those detectors are scientifically validated.
+Phase 5 should focus on consent-based speaker verification as an independent detector, plus representative multilingual/unseen-generator evaluation, validation-only calibration, physical-device latency/memory/thermal profiling, and careful live voice-integrity feasibility testing. Speaker mismatch remains unavailable until that work is independently validated.

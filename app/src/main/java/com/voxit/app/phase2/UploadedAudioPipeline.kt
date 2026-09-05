@@ -5,6 +5,9 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.voxit.app.domain.TranscriptionOutput
+import com.voxit.app.integrity.IntegrityModelState
+import com.voxit.app.integrity.IntegrityModelStore
+import com.voxit.app.integrity.OnDeviceVoiceIntegrityEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,13 +18,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class UploadedAudioPipeline(context: Context, private val modelStore: VoskModelStore = VoskModelStore(context)) {
+class UploadedAudioPipeline(context: Context, private val modelStore: VoskModelStore = VoskModelStore(context), integrityStore: IntegrityModelStore = IntegrityModelStore(context)) {
     private val decoder = AndroidAudioDecoder(context.contentResolver)
     private val speechDetector = EnergySpeechActivityDetector()
     private val featureExtractor = SignalFeatureExtractor()
     private val waveformDownsampler = WaveformDownsampler()
     private val transcriptionEngine = VoskTranscriptionEngine(modelStore)
     private val riskEngine = OfflineConversationRiskEngine()
+    private val integrityEngine = OnDeviceVoiceIntegrityEngine(integrityStore)
 
     suspend fun analyse(file: SelectedAudio, language: String, progress: (PipelineStage) -> Unit): RealAnalysisResult = withContext(Dispatchers.Default) {
         progress(PipelineStage.OPENING); currentCoroutineContext().ensureActive()
@@ -39,6 +43,8 @@ class UploadedAudioPipeline(context: Context, private val modelStore: VoskModelS
         val analysisWindow = prepared.copyOf(minOf(prepared.size, AudioLimits.TARGET_SAMPLE_RATE * 30))
         val features = featureExtractor.extract(analysisWindow, AudioLimits.TARGET_SAMPLE_RATE)
         val waveform = waveformDownsampler.downsample(prepared, AudioLimits.TARGET_SAMPLE_RATE, speech)
+        currentCoroutineContext().ensureActive(); progress(PipelineStage.VOICE_INTEGRITY)
+        val integrity = integrityEngine.analyse(prepared, AudioLimits.TARGET_SAMPLE_RATE, speech, quality)
         currentCoroutineContext().ensureActive(); progress(PipelineStage.LOADING_MODEL)
         val transcription = if (quality.usableSpeechMs < AudioLimits.MIN_USABLE_SPEECH_MS) TranscriptionOutput.Unavailable("Insufficient speech for transcription.")
         else { progress(PipelineStage.TRANSCRIBING); transcriptionEngine.transcribe(prepared, AudioLimits.TARGET_SAMPLE_RATE, language) }
@@ -61,6 +67,8 @@ class UploadedAudioPipeline(context: Context, private val modelStore: VoskModelS
                 is TranscriptionOutput.Unavailable -> transcription.reason
                 is TranscriptionOutput.Failed -> transcription.reason
             },
+            manipulationScore = (integrity as? com.voxit.app.integrity.VoiceIntegrityResult.Available)?.score,
+            voiceIntegrity = integrity,
         )
     }
 }
@@ -68,6 +76,7 @@ class UploadedAudioPipeline(context: Context, private val modelStore: VoskModelS
 class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     private val pipeline = UploadedAudioPipeline(applicationContext)
     private val modelStore = VoskModelStore(applicationContext)
+    private val integrityStore = IntegrityModelStore(applicationContext)
     private val _uiState = MutableStateFlow<Phase2UiState>(Phase2UiState.Idle)
     val uiState = _uiState.asStateFlow()
     private val initialModelCatalog = modelStore.catalog()
@@ -78,9 +87,12 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     val modelState = _modelState.asStateFlow()
     private val _modelCatalog = MutableStateFlow(initialModelCatalog)
     val modelCatalog = _modelCatalog.asStateFlow()
+    private val _integrityModelState = MutableStateFlow(integrityStore.state())
+    val integrityModelState = _integrityModelState.asStateFlow()
     private var selectedAudio: SelectedAudio? = null
     private var analysisJob: Job? = null
     private var modelJob: Job? = null
+    private var integrityModelJob: Job? = null
     private val sessions = SessionGeneration()
     var preferredLanguage: String = "Auto / Hinglish"
 
@@ -180,7 +192,25 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
         _uiState.value = if (current.transcriptionModel == null) Phase2UiState.ModelRequired(cleared) else Phase2UiState.Complete(cleared)
     }
 
-    override fun onCleared() { cancelAnalysis(setCancelled = false); modelJob?.cancel(); super.onCleared() }
+    fun importIntegrityModel(uri: Uri) {
+        if (integrityModelJob?.isActive == true || analysisJob?.isActive == true) return
+        integrityModelJob = viewModelScope.launch(Dispatchers.IO) {
+            _integrityModelState.value = integrityStore.importModel(uri) { _integrityModelState.value = it }
+            clearIntegrityBoundResult()
+            integrityModelJob = null
+        }
+    }
+
+    fun deleteIntegrityModel() {
+        if (analysisJob?.isActive == true) return
+        integrityStore.delete()
+        _integrityModelState.value = integrityStore.state()
+        clearIntegrityBoundResult()
+    }
+
+    fun refreshIntegrityModel() { _integrityModelState.value = integrityStore.state() }
+
+    override fun onCleared() { cancelAnalysis(setCancelled = false); modelJob?.cancel(); integrityModelJob?.cancel(); super.onCleared() }
 
     private fun liveSessionActive(): Boolean {
         val state = com.voxit.app.live.LiveProtectionStore.state.value
@@ -213,4 +243,12 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
             ),
         )
     }
+
+    private fun clearIntegrityBoundResult() {
+        val current = when (val state = _uiState.value) { is Phase2UiState.Complete -> state.result; is Phase2UiState.ModelRequired -> state.result; else -> null } ?: return
+        val cleared = current.copy(manipulationScore = null, voiceIntegrity = com.voxit.app.integrity.VoiceIntegrityResult.Unavailable("Voice-integrity model changed. Analyse the recording again."))
+        _uiState.value = if (stateHasTranscript(cleared)) Phase2UiState.Complete(cleared) else Phase2UiState.ModelRequired(cleared)
+    }
+
+    private fun stateHasTranscript(result: RealAnalysisResult) = result.transcriptionModel != null
 }

@@ -70,6 +70,10 @@ downloaded-models/
 *.gguf
 *.safetensors
 *.task
+ml/artifacts/
+ml/data/
+ml/reports/private/
+ml/**/*.npz
 
 # General temporary files
 *.tmp

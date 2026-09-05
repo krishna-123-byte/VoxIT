@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voxit.app.phase2.*
+import com.voxit.app.integrity.*
 import com.voxit.app.ui.theme.*
 import kotlin.math.roundToInt
 
@@ -36,9 +37,11 @@ import kotlin.math.roundToInt
 fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: () -> Unit) {
     val state by vm.uiState.collectAsState()
     val modelState by vm.modelState.collectAsState()
+    val integrityState by vm.integrityModelState.collectAsState()
     var importLanguage by rememberSaveable { mutableStateOf("English") }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::selectAudio) }
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importModel(it, importLanguage) } }
+    val integrityPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importIntegrityModel) }
     Scaffold(containerColor = Navy, topBar = { Phase2TopBar("Upload recording", onBack) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Real uploaded-audio analysis", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -81,7 +84,9 @@ fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: ()
             }
             OutlinedButton(onClick = { modelPicker.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = modelState !is ModelImportState.Importing, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Import Model ZIP") }
             Text("*Hinglish recognition is experimental and depends on the vocabulary of the imported single-language model.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
-            Text("AI voice model not installed. Signal features are observations only; manipulation score remains unavailable.", color = Amber, style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider(color = SignalMuted.copy(.25f))
+            Text("Acoustic voice-integrity model", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+            IntegrityModelPanel(integrityState, onImport = { integrityPicker.launch(arrayOf("application/onnx", "application/octet-stream")) }, onDelete = vm::deleteIntegrityModel)
         }
     }
 }
@@ -111,6 +116,7 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
         MetricsCard(result)
         Text("Detector outputs", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         UnavailableScores(result)
+        IntegrityResultCard(result.voiceIntegrity)
         Text("Experimental audio information", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         SignalCard(result.features)
         Text("These signal observations are not proof of AI generation and are not converted into a manipulation percentage.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
@@ -136,7 +142,7 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
         Text("Transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         Text(if (result.transcriptionModel == null) "Not installed" else "${result.transcriptionModel} • ${result.transcriptionVersion}")
         Text("Limitations", color = SignalBlue, fontWeight = FontWeight.SemiBold)
-        Phase2Info("Uploaded audio only. Speaker verification is not configured. No trained AI voice-cloning classifier is present. Conversation rules can miss scams or flag benign wording; verify using an official number.")
+        Phase2Info("Acoustic integrity and transcript scam analysis are separate warnings. AASIST-L is a binary bona-fide/spoof research model, not a reliable subtype classifier. Speaker verification is not configured. Verify suspicious calls using an official number.")
     }
 }
 
@@ -170,7 +176,38 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
 @Composable private fun RealWaveform(points: List<WaveformPoint>, selectedMs: Long, onSeek: (Long) -> Unit) { val maxTime = points.lastOrNull()?.timeMs?.coerceAtLeast(1) ?: 1L; Canvas(Modifier.fillMaxWidth().height(150.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).pointerInput(points) { awaitEachGesture { val down = awaitFirstDown(); onSeek((down.position.x / size.width * maxTime).toLong().coerceIn(0, maxTime)); do { val event = awaitPointerEvent(); event.changes.firstOrNull()?.let { change -> onSeek((change.position.x / size.width * maxTime).toLong().coerceIn(0, maxTime)); change.consume() } } while (event.changes.any { it.pressed }) } }.padding(10.dp)) { if (points.isNotEmpty()) { val center = size.height / 2; points.forEachIndexed { index, point -> val x = index * size.width / points.size; val height = 5f + point.amplitude * size.height * .42f; drawLine(if (point.isSpeech) SafeGreen else SignalMuted, Offset(x, center - height), Offset(x, center + height), strokeWidth = 3f, cap = StrokeCap.Round) }; val markerX = selectedMs.toFloat() / maxTime * size.width; drawLine(Amber, Offset(markerX, 0f), Offset(markerX, size.height), strokeWidth = 4f) } } }
 @Composable private fun MetadataCard(metadata: AudioMetadata) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Phase2Detail("MIME type", metadata.mimeType); Phase2Detail("File size", formatBytes(metadata.fileSizeBytes)); Phase2Detail("Duration", formatDuration(metadata.durationMs)); Phase2Detail("Source sample rate", "${metadata.sampleRate} Hz"); Phase2Detail("Channels", metadata.channelCount.toString()) } }
 @Composable private fun MetricsCard(result: RealAnalysisResult) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Phase2Detail("RMS energy", "%.4f".format(result.quality.rmsEnergy)); Phase2Detail("Peak amplitude", "%.3f".format(result.quality.peakAmplitude)); Phase2Detail("Clipping", "%.2f%%".format(result.quality.clippingPercent)); Phase2Detail("Silence", "%.1f%%".format(result.quality.silencePercent)); Phase2Detail("Noise estimate", "%.4f RMS".format(result.quality.approximateNoiseRms)); Phase2Detail("Usable speech", formatDuration(result.quality.usableSpeechMs)); Text(result.speechRegions.joinToString { "${formatTime(it.startMs)}–${formatTime(it.endMs)}" }, color = SignalMuted, style = MaterialTheme.typography.bodySmall) } }
-@Composable private fun UnavailableScores(result: RealAnalysisResult) = Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Phase2Score("Voice manipulation", result.manipulationScore?.toString() ?: "Unavailable", "AI voice model not installed", Modifier.weight(1f)); Phase2Score("Speaker mismatch", result.speakerMismatchScore?.toString() ?: "Not configured", "No reference speaker", Modifier.weight(1f)); Phase2Score("Scam risk", result.conversationRisk.score?.toString() ?: "Unavailable", if (result.conversationRisk.score == null) "No real transcript" else "Transcript rules", Modifier.weight(1f)) }
+@Composable private fun UnavailableScores(result: RealAnalysisResult) = Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Phase2Score("Voice manipulation", result.manipulationScore?.let { "$it%" } ?: "Unavailable", if (result.manipulationScore == null) "No validated model result" else "Acoustic model", Modifier.weight(1f)); Phase2Score("Speaker mismatch", result.speakerMismatchScore?.toString() ?: "Not configured", "No reference speaker", Modifier.weight(1f)); Phase2Score("Scam risk", result.conversationRisk.score?.let { "$it%" } ?: "Unavailable", if (result.conversationRisk.score == null) "No real transcript" else "Transcript rules", Modifier.weight(1f)) }
+
+@Composable private fun IntegrityModelPanel(state: IntegrityModelState, onImport: () -> Unit, onDelete: () -> Unit) {
+    val color = if (state.status == IntegrityModelStatus.READY) SafeGreen else if (state.status in setOf(IntegrityModelStatus.CORRUPT, IntegrityModelStatus.INCOMPATIBLE, IntegrityModelStatus.ERROR)) AlertRed else Amber
+    Phase2Info("${state.status.name.replace('_', ' ')} — ${state.message}" + (state.metadata?.let { "\n${it.name} • ${it.version}\nMIT • ${(it.sizeBytes / 1024)} KB • ${it.pathIdentifier}" } ?: ""), color)
+    OutlinedButton(onClick = onImport, enabled = state.status !in setOf(IntegrityModelStatus.IMPORTING, IntegrityModelStatus.VALIDATING), modifier = Modifier.fillMaxWidth().height(50.dp)) { Text(if (state.status == IntegrityModelStatus.READY) "Replace AASIST-L ONNX model" else "Import verified AASIST-L ONNX model") }
+    if (state.status == IntegrityModelStatus.READY) OutlinedButton(onClick = onDelete, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Delete voice-integrity model") }
+    Text("Required file: the reproducible VoxIT export of the official AASIST-L checkpoint. SHA-256 and tensor contract are verified before activation. It stays in app-private storage.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable private fun IntegrityResultCard(result: VoiceIntegrityResult) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text("Acoustic voice integrity", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+        when (result) {
+            is VoiceIntegrityResult.Unavailable -> Text("Unavailable — ${result.reason}", color = Amber)
+            is VoiceIntegrityResult.Failed -> Text("Analysis failed — ${result.reason}", color = AlertRed)
+            is VoiceIntegrityResult.Available -> {
+                Text(result.conclusion.label, fontWeight = FontWeight.Bold, color = when (result.conclusion) { IntegrityConclusion.LIKELY_AUTHENTIC -> SafeGreen; IntegrityConclusion.POSSIBLE_MANIPULATION -> AlertRed; else -> Amber })
+                Phase2Detail("Model score", "${result.score}% synthetic/spoof")
+                Phase2Detail("Confidence", "${result.confidence}%")
+                Phase2Detail("Threshold", "${(result.threshold * 100).toInt()}%")
+                Phase2Detail("Windows", "${result.validWindows} • agreement ${(result.agreement * 100).toInt()}%")
+                Phase2Detail("Speech analysed", formatDuration(result.analysedSpeechMs))
+                Phase2Detail("Runtime", "load ${result.initializationMs} ms • window ${result.meanInferenceMs} ms")
+                Text("${result.model.name} • ${result.model.version} • ${result.model.licence}", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+                Text(result.calibration, color = Amber, style = MaterialTheme.typography.bodySmall)
+                Text(result.limitations, color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+                Text("This acoustic warning can be wrong and does not prove fraud or identify a caller.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
 @Composable private fun Phase2Score(title: String, value: String, detail: String, modifier: Modifier) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = modifier) { Column(Modifier.padding(10.dp)) { Text(title, color = SignalMuted, fontSize = 11.sp); Text(value, fontWeight = FontWeight.Bold, fontSize = if (value.length < 4) 26.sp else 14.sp); Text(detail, color = SignalMuted, fontSize = 10.sp) } }
 @Composable private fun SignalCard(features: SignalFeatures) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Phase2Detail("Zero-crossing rate", "%.4f".format(features.zeroCrossingRate)); Phase2Detail("Spectral centroid", "%.0f Hz".format(features.spectralCentroidHz)); Phase2Detail("Spectral roll-off", "%.0f Hz".format(features.spectralRolloffHz)); Phase2Detail("Spectral flatness", "%.3f".format(features.spectralFlatness)); Phase2Detail("Spectrum", "Low %.0f%% • Mid %.0f%% • High %.0f%%".format(features.lowBandPercent, features.midBandPercent, features.highBandPercent)); Phase2Detail("Pitch", features.pitchHz?.let { "%.1f Hz".format(it) } ?: "Unavailable"); Phase2Detail("Pitch stability", features.pitchStability?.toString() ?: "Insufficient observations") } }
 @Composable private fun WarningCard(warning: TranscriptWarning) = Card(colors = CardDefaults.cardColors(containerColor = AlertRed.copy(.15f)), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("${warning.timestamp} • ${warning.category}", color = AlertRed, fontWeight = FontWeight.SemiBold); Text(warning.evidence); Text(warning.explanation, color = SignalMuted); Text("Confidence ${warning.confidence}% • ${warning.detectorMode}", color = SignalMuted, fontSize = 12.sp) } }

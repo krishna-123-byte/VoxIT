@@ -2,6 +2,7 @@ package com.voxit.app.phase2
 
 import android.net.Uri
 import com.voxit.app.domain.TranscriptSegment
+import com.voxit.app.integrity.VoiceIntegrityResult
 
 object AudioLimits {
     const val MAX_FILE_BYTES = 100L * 1024L * 1024L
@@ -100,13 +101,14 @@ data class RealAnalysisResult(
     val transcriptSaved: Boolean = false,
     val manipulationScore: Int? = null,
     val speakerMismatchScore: Int? = null,
+    val voiceIntegrity: VoiceIntegrityResult = VoiceIntegrityResult.Unavailable("Voice-integrity model not installed"),
 )
 
 enum class PipelineStage(val label: String, val progress: Float) {
     OPENING("Opening file", .04f), VALIDATING("Validating", .10f), DECODING("Decoding", .20f),
     PREPARING("Preparing samples", .34f), DETECTING_SPEECH("Detecting speech", .48f),
-    EXTRACTING("Extracting audio information", .60f), LOADING_MODEL("Loading transcription model", .70f),
-    TRANSCRIBING("Transcribing", .80f), ANALYSING_TRANSCRIPT("Analysing transcript", .90f),
+    EXTRACTING("Extracting audio information", .58f), VOICE_INTEGRITY("Analysing acoustic voice integrity", .68f), LOADING_MODEL("Loading transcription model", .74f),
+    TRANSCRIBING("Transcribing", .82f), ANALYSING_TRANSCRIPT("Analysing transcript", .91f),
     PREPARING_RESULT("Preparing result", .97f), COMPLETE("Complete", 1f)
 }
 

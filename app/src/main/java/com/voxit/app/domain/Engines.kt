@@ -1,10 +1,16 @@
 package com.voxit.app.domain
 
+import com.voxit.app.integrity.VoiceIntegrityResult
+import com.voxit.app.phase2.AudioQualityMetrics
+import com.voxit.app.phase2.SpeechRegion
+
 /** Contracts for later on-device implementations. Phase 1 real engines never invent output. */
 interface AudioPreprocessor
 interface SpeechActivityDetector
 interface AudioFeatureExtractor
-interface VoiceIntegrityEngine { suspend fun analyse(source: AudioSource): AnalysisSession }
+interface VoiceIntegrityEngine {
+    suspend fun analyse(samples: FloatArray, sampleRate: Int, speechRegions: List<SpeechRegion>, quality: AudioQualityMetrics): VoiceIntegrityResult
+}
 interface TranscriptionEngine {
     suspend fun transcribe(samples: FloatArray, sampleRate: Int, language: String): TranscriptionOutput
 }
@@ -15,17 +21,13 @@ interface AlertManager
 interface CallControlProvider { fun openPhoneControls() }
 
 class RealVoiceIntegrityEngine : VoiceIntegrityEngine {
-    override suspend fun analyse(source: AudioSource) = AnalysisSession(
-        id = "unavailable", source = if (source is UploadedAudioSource) AnalysisSource.UPLOAD else AnalysisSource.LIVE_PROTECTION,
-        mode = DetectorMode.REAL, state = EngineState.MODEL_UNAVAILABLE
-    )
+    override suspend fun analyse(samples: FloatArray, sampleRate: Int, speechRegions: List<SpeechRegion>, quality: AudioQualityMetrics) =
+        VoiceIntegrityResult.Unavailable("Voice-integrity model not installed")
 }
 
 class DemoVoiceIntegrityEngine : VoiceIntegrityEngine {
-    override suspend fun analyse(source: AudioSource) = AnalysisSession(
-        id = "demo", source = AnalysisSource.DEMO, mode = DetectorMode.DEMO,
-        state = EngineState.RESULT_AVAILABLE, modelVersion = "Demo timeline v1"
-    )
+    override suspend fun analyse(samples: FloatArray, sampleRate: Int, speechRegions: List<SpeechRegion>, quality: AudioQualityMetrics) =
+        VoiceIntegrityResult.Unavailable("Demo Mode uses only its clearly labelled deterministic scenarios.")
 }
 
 class DemoTranscriptionEngine : TranscriptionEngine {

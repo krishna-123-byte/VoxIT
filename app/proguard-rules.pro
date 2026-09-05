@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Required by the official ONNX Runtime Android package when R8 is enabled.
+-keep class ai.onnxruntime.** { *; }

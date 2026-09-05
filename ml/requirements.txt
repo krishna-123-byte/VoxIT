@@ -1,0 +1,6 @@
+numpy==2.0.2
+onnx==1.19.1
+onnxruntime==1.19.2
+scikit-learn==1.6.1
+torch==2.8.0
+pytest==8.4.2
