@@ -26,6 +26,9 @@ class LiveProtectionInstrumentedTest {
         assertFalse(Manifest.permission.READ_SMS in requested)
         assertFalse(Manifest.permission.READ_PHONE_STATE in requested)
         assertFalse(Manifest.permission.CAPTURE_AUDIO_OUTPUT in requested)
+        assertFalse(Manifest.permission.INTERNET in requested)
+        assertFalse(Manifest.permission.READ_EXTERNAL_STORAGE in requested)
+        assertFalse(Manifest.permission.WRITE_EXTERNAL_STORAGE in requested)
         val service = context.packageManager.getServiceInfo(ComponentName(context, LiveProtectionService::class.java), 0)
         if (Build.VERSION.SDK_INT >= 29) assertTrue(service.foregroundServiceType and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0)
     }
@@ -34,6 +37,10 @@ class LiveProtectionInstrumentedTest {
         val controller = FloatingBubbleController(context) { }
         val shown = controller.show()
         if (!android.provider.Settings.canDrawOverlays(context)) assertFalse(shown)
+        if (shown) {
+            assertTrue(controller.show())
+            assertTrue(controller.isShowing())
+        }
         controller.hide(); controller.hide()
         assertFalse(controller.isShowing())
     }

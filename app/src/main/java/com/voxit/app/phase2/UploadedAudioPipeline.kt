@@ -77,6 +77,7 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     private val pipeline = UploadedAudioPipeline(applicationContext)
     private val modelStore = VoskModelStore(applicationContext)
     private val integrityStore = IntegrityModelStore(applicationContext)
+    private val historyStore = LocalHistoryStore(applicationContext)
     private val _uiState = MutableStateFlow<Phase2UiState>(Phase2UiState.Idle)
     val uiState = _uiState.asStateFlow()
     private val initialModelCatalog = modelStore.catalog()
@@ -89,6 +90,7 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     val modelCatalog = _modelCatalog.asStateFlow()
     private val _integrityModelState = MutableStateFlow(integrityStore.state())
     val integrityModelState = _integrityModelState.asStateFlow()
+    val history = historyStore.entries
     private var selectedAudio: SelectedAudio? = null
     private var analysisJob: Job? = null
     private var modelJob: Job? = null
@@ -133,6 +135,19 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
     fun retry() { analyse() }
     fun reset() { cancelAnalysis(setCancelled = false); selectedAudio = null; _uiState.value = Phase2UiState.Idle }
 
+    fun retainCurrentResult(): Boolean {
+        val result = when (val state = _uiState.value) {
+            is Phase2UiState.Complete -> state.result
+            is Phase2UiState.ModelRequired -> state.result
+            else -> null
+        } ?: return false
+        historyStore.retain(result)
+        return true
+    }
+
+    fun deleteHistoryEntry(id: String) = historyStore.delete(id)
+    fun clearHistory() = historyStore.clear()
+
     fun importModel(uri: Uri, language: String) {
         if (modelJob?.isActive == true) return
         if (liveSessionActive()) {
@@ -176,13 +191,13 @@ class Phase2ViewModel(private val applicationContext: Context) : ViewModel() {
         }
     }
 
-    fun deleteModel() {
+    fun deleteModel(modelId: String? = null) {
         if (liveSessionActive()) {
             _modelState.value = ModelImportState.Error("Stop Live Protection before deleting its transcription model.")
             return
         }
         modelJob?.cancel()
-        modelStore.deleteModel()
+        modelStore.deleteModel(modelId ?: modelStore.selectedModelId())
         refreshModels()
         clearModelBoundResult()
     }

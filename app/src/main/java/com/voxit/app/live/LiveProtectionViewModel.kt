@@ -14,7 +14,7 @@ class LiveProtectionViewModel(private val context: Context) : ViewModel() {
 
     fun start(options: LiveStartOptions) {
         val current = state.value.status
-        if (current !in setOf(LiveSessionStatus.IDLE, LiveSessionStatus.STOPPED, LiveSessionStatus.PERMISSION_REQUIRED, LiveSessionStatus.ERROR, LiveSessionStatus.AUDIO_UNAVAILABLE)) return
+        if (!LiveStartPolicy.canStart(current)) return
         LiveProtectionStore.update { LiveProtectionState(sessionId = it.sessionId + 1, status = LiveSessionStatus.STARTING_SERVICE, transcriptionStatus = "Preparing model status…") }
         ContextCompat.startForegroundService(context, serviceIntent(LiveProtectionService.ACTION_START).apply {
             putExtra(LiveProtectionService.EXTRA_BUBBLE, options.bubbleRequested)
@@ -42,4 +42,15 @@ class LiveProtectionViewModel(private val context: Context) : ViewModel() {
     }
 
     private fun serviceIntent(action: String) = Intent(context, LiveProtectionService::class.java).setAction(action)
+}
+
+object LiveStartPolicy {
+    private val restartable = setOf(
+        LiveSessionStatus.IDLE,
+        LiveSessionStatus.STOPPED,
+        LiveSessionStatus.PERMISSION_REQUIRED,
+        LiveSessionStatus.ERROR,
+        LiveSessionStatus.AUDIO_UNAVAILABLE,
+    )
+    fun canStart(status: LiveSessionStatus): Boolean = status in restartable
 }

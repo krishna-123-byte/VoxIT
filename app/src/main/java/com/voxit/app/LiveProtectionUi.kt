@@ -158,10 +158,10 @@ fun LiveProtectionScreen(
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LiveDetectorCard("Voice manipulation", "Unavailable", "AI voice model not installed", Modifier.weight(1f))
-                LiveDetectorCard("Speaker mismatch", "Not configured", "No reference speaker", Modifier.weight(1f))
+                LiveDetectorCard("Voice manipulation", "Unavailable", "Uploaded-recording detector only", Modifier.weight(1f))
                 LiveDetectorCard("Scam risk", state.conversationRisk.score?.toString() ?: "Unavailable", if (state.conversationRisk.score == null) "Needs confirmed transcript" else "Rolling 60-second window", Modifier.weight(1f))
             }
+            LiveInfo("Speaker verification not included in this prototype", SignalMuted)
 
             Text("Floating bubble", color = SignalBlue, fontWeight = FontWeight.SemiBold)
             LiveDetail("Status", state.bubbleStatus.label())

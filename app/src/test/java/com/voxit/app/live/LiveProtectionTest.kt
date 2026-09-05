@@ -74,6 +74,18 @@ class LiveProtectionTest {
         assertFalse(state.sourceNotice.contains("demo", true))
     }
 
+    @Test fun liveStartStopStartIsAllowedButDuplicateActiveStartsAreRejected() {
+        assertTrue(LiveStartPolicy.canStart(LiveSessionStatus.IDLE))
+        assertFalse(LiveStartPolicy.canStart(LiveSessionStatus.STARTING_SERVICE))
+        assertFalse(LiveStartPolicy.canStart(LiveSessionStatus.LISTENING))
+        assertFalse(LiveStartPolicy.canStart(LiveSessionStatus.PAUSED))
+        assertTrue(LiveStartPolicy.canStart(LiveSessionStatus.STOPPED))
+        val secondSession = LiveProtectionState(sessionId = 2, status = LiveSessionStatus.STARTING_SERVICE)
+        assertTrue(secondSession.waveform.isEmpty())
+        assertTrue(secondSession.confirmedTranscript.isEmpty())
+        assertNull(secondSession.conversationRisk.score)
+    }
+
     @Test fun modelIdentitiesAreStableAndUnambiguousAcrossLanguages() {
         val english = VoskModelIdentity.stableId("vosk-model-small-en-us-0.15", "en-US")
         val hindi = VoskModelIdentity.stableId("vosk-model-small-hi-0.22", "hi-IN")

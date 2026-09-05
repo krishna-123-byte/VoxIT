@@ -15,7 +15,7 @@ Phase 1 includes a complete deterministic Demo Mode with six repeatable scenario
 - Suspicious scam conversation
 - High combined risk
 
-Every demo result is visibly labelled **DEMO MODE – SIMULATED RESULT**. The timeline data is predefined, can rise and fall, and does not analyse uploaded audio or microphone input.
+Every demo result is visibly labelled **SIMULATED DEMO — NOT A REAL DETECTION**. The timeline data is predefined, can rise and fall, and does not analyse uploaded audio or microphone input.
 
 ## Phase 2: uploaded audio
 
@@ -94,6 +94,16 @@ Analysis uses only detected speech, 64,600-sample windows with 32,300-sample ove
 
 AASIST-L is a binary bona-fide/spoof research model trained on ASVspoof 2019 LA. It may detect artifacts from the synthetic-speech and voice-conversion systems represented there, but it cannot reliably distinguish TTS, voice conversion, or cloning subtypes; it is not a validated replay detector; and it does not verify identity or prove fraud. VoxIT has not run an accuracy dataset evaluation or calibration. See [the Phase 4 research report](docs/phase4-model-evaluation.md) and [model card](ml/model-card.md).
 
+## Phase 5: final prototype integration
+
+Version `1.0.0-prototype` brings the independent Phase 1–4 capabilities into one cautious workflow. Home reports English, Hindi, selected transcription, AASIST-L, Live Protection, and local-processing status without claiming unavailable features are ready. Model Manager is the single place to import, select, replace, inspect, and delete Vosk and voice-integrity models. Unsafe transcription-model changes remain blocked while Live Protection is active, and deletion never silently selects a different model.
+
+Real uploaded results now keep five sections visibly separate: audio quality, transcript, scam-language/context risk, acoustic voice integrity, and overall safety guidance. The guidance explains its contributing signals; it is not a combined fraud probability. Speaker verification is explicitly not included. AASIST-L remains upload-only and its output remains an experimental, uncalibrated research score.
+
+History is opt-in and metadata-only. Retaining a result stores its time, duration, quality, detector conclusions/scores, and model names in app-private preferences. It never stores the source filename, URI, original recording, PCM, or transcript. Individual and complete history deletion require confirmation. Demo results never enter real history.
+
+See [Final Prototype Guide](docs/FINAL_PROTOTYPE.md) for architecture, setup, workflows, permissions, manual verification, and honest limitations.
+
 ## Run
 
 Open the project in Android Studio, sync Gradle, select an emulator/device running Android 8.0 (API 26) or newer, and run the `app` configuration. From a terminal:
@@ -108,6 +118,6 @@ The app declares microphone and foreground-service permissions for explicitly st
 
 A standard Android app cannot directly access protected cellular-call audio. Live Protection analyses only the microphone input Android actually supplies and must be started explicitly by the user.
 
-## Planned phases
+## Future work
 
-Phase 5 should focus on consent-based speaker verification as an independent detector, plus representative multilingual/unseen-generator evaluation, validation-only calibration, physical-device latency/memory/thermal profiling, and careful live voice-integrity feasibility testing. Speaker mismatch remains unavailable until that work is independently validated.
+The next work should be validation rather than another feature phase: representative multilingual and unseen-generator evaluation, validation-only calibration, and physical-device latency, memory, battery, thermal, microphone-routing, and repeated overlay/service lifecycle testing. Consent-based speaker verification remains separately scoped and must not be treated as proof of fraud.

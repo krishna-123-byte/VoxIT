@@ -105,22 +105,30 @@ fun Phase2RealResultScreen(vm: Phase2ViewModel, onBack: () -> Unit) {
 private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, modifier: Modifier) {
     var selectedTime by rememberSaveable { mutableLongStateOf(0L) }
     var search by rememberSaveable { mutableStateOf("") }
+    var retained by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    val guidance = OverallGuidancePolicy.evaluate(result)
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete this analysis?") },
+        text = { Text("The in-memory result and transcript will be cleared. The original recording is never copied into VoxIT storage.") },
+        confirmButton = { Button(onClick = { confirmDelete = false; vm.reset() }) { Text("Delete") } },
+        dismissButton = { OutlinedButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("REAL MODE", color = SignalBlue, fontWeight = FontWeight.Bold)
         Text(result.metadata.fileName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("1. Audio quality", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         RealWaveform(result.waveform, selectedTime) { selectedTime = it }
         Text("Seek preview: ${formatTime(selectedTime)} • teal bars are detected speech; muted bars are silence.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
         MetadataCard(result.metadata)
         Phase2Info("${result.quality.quality.label}: ${result.quality.quality.explanation}", qualityColor(result.quality.quality))
         MetricsCard(result)
-        Text("Detector outputs", color = SignalBlue, fontWeight = FontWeight.SemiBold)
-        UnavailableScores(result)
-        IntegrityResultCard(result.voiceIntegrity)
         Text("Experimental audio information", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         SignalCard(result.features)
         Text("These signal observations are not proof of AI generation and are not converted into a manipulation percentage.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
-        Text("Transcript", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+        Text("2. Transcript", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         Text("Transcript not saved", color = SafeGreen, fontWeight = FontWeight.SemiBold)
         Text(result.transcriptionMessage, color = SignalMuted)
         if (result.transcript.isNotEmpty()) {
@@ -136,13 +144,24 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
                 OutlinedButton(onClick = vm::deleteTranscript, modifier = Modifier.weight(1f)) { Text("Delete") }
             }
         }
+        Text("3. Scam-language / context risk", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         Text("Experimental conversation-risk warning", color = Amber, fontWeight = FontWeight.SemiBold)
         Phase2Info(result.conversationRisk.explanation, Amber)
         result.conversationRisk.warnings.forEach { warning -> WarningCard(warning) }
         Text("Transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold)
         Text(if (result.transcriptionModel == null) "Not installed" else "${result.transcriptionModel} • ${result.transcriptionVersion}")
+        Text("4. Voice-integrity analysis", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+        IntegrityResultCard(result.voiceIntegrity)
+        Phase2Info("Speaker verification not included in this prototype", SignalMuted)
+        Text("5. Overall safety guidance", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+        Phase2Info(guidance.level.label, when (guidance.level) { GuidanceLevel.NO_STRONG_WARNING -> SafeGreen; GuidanceLevel.REVIEW -> Amber; GuidanceLevel.HIGH_CAUTION -> AlertRed })
+        guidance.reasons.forEach { Text("• $it", color = SignalMuted) }
+        Text("This guidance is not a fraud probability. It explains independent acoustic, transcript, and quality signals; unavailable detectors are never treated as zero risk.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
         Text("Limitations", color = SignalBlue, fontWeight = FontWeight.SemiBold)
-        Phase2Info("Acoustic integrity and transcript scam analysis are separate warnings. AASIST-L is a binary bona-fide/spoof research model, not a reliable subtype classifier. Speaker verification is not configured. Verify suspicious calls using an official number.")
+        Phase2Info("Acoustic integrity and transcript scam analysis are separate warnings. AASIST-L is a binary bona-fide/spoof research model, not a reliable subtype classifier. Verify suspicious calls using an official number.")
+        Button(onClick = { retained = vm.retainCurrentResult() }, enabled = !retained, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text(if (retained) "Result metadata retained locally" else "Retain result metadata locally") }
+        Text("Retains only duration, quality, detector conclusions/scores, model names, and time—not filename, URI, audio, PCM, or transcript.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Delete result and transcript") }
     }
 }
 
@@ -170,7 +189,7 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
     }
 }
 
-@Composable fun ModelManagementPanel(vm: Phase2ViewModel) { val state by vm.modelState.collectAsState(); Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Offline transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold); ModelStatus(state); ModelChooser(vm); if (state is ModelImportState.Ready) OutlinedButton(onClick = vm::deleteModel, modifier = Modifier.fillMaxWidth()) { Text("Delete selected model") }; Text("Models use separate app-private directories and are never uploaded. Switching is blocked while Live Protection is active.", color = SignalMuted, style = MaterialTheme.typography.bodySmall) } }
+@Composable fun ModelManagementPanel(vm: Phase2ViewModel) { val state by vm.modelState.collectAsState(); Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Offline transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold); ModelStatus(state); ModelChooser(vm); if (state is ModelImportState.Ready) OutlinedButton(onClick = { vm.deleteModel() }, modifier = Modifier.fillMaxWidth()) { Text("Delete selected model") }; Text("Models use separate app-private directories and are never uploaded. Switching is blocked while Live Protection is active.", color = SignalMuted, style = MaterialTheme.typography.bodySmall) } }
 @Composable private fun Phase2Info(text: String, color: androidx.compose.ui.graphics.Color = SignalBlue) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Text(text, modifier = Modifier.padding(14.dp), color = color) }
 
 @Composable private fun RealWaveform(points: List<WaveformPoint>, selectedMs: Long, onSeek: (Long) -> Unit) { val maxTime = points.lastOrNull()?.timeMs?.coerceAtLeast(1) ?: 1L; Canvas(Modifier.fillMaxWidth().height(150.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).pointerInput(points) { awaitEachGesture { val down = awaitFirstDown(); onSeek((down.position.x / size.width * maxTime).toLong().coerceIn(0, maxTime)); do { val event = awaitPointerEvent(); event.changes.firstOrNull()?.let { change -> onSeek((change.position.x / size.width * maxTime).toLong().coerceIn(0, maxTime)); change.consume() } } while (event.changes.any { it.pressed }) } }.padding(10.dp)) { if (points.isNotEmpty()) { val center = size.height / 2; points.forEachIndexed { index, point -> val x = index * size.width / points.size; val height = 5f + point.amplitude * size.height * .42f; drawLine(if (point.isSpeech) SafeGreen else SignalMuted, Offset(x, center - height), Offset(x, center + height), strokeWidth = 3f, cap = StrokeCap.Round) }; val markerX = selectedMs.toFloat() / maxTime * size.width; drawLine(Amber, Offset(markerX, 0f), Offset(markerX, size.height), strokeWidth = 4f) } } }
