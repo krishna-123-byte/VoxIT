@@ -1,8 +1,10 @@
-# VoxIT 1.0.0-prototype
+# VoxIT 1.1.0-prototype
 
 ## Purpose and final architecture
 
 VoxIT is a privacy-first Android cybersecurity prototype. It presents warnings—not proof—using two independent evidence paths:
+
+The official supplied VoxIT logo identifies the launcher, splash, onboarding, Home, Live Protection notification and optional bubble. Uploaded results now lead with glanceable overall guidance while keeping acoustic voice-integrity and transcript/context scam findings separate.
 
 - Acoustic voice integrity: optional, uploaded-recording-only AASIST-L inference through ONNX Runtime.
 - Conversation risk: optional offline Vosk transcription followed by explainable scam-language/context rules.
@@ -15,7 +17,7 @@ No component converts missing evidence into a zero score or substitutes Demo Mod
 
 ### Uploaded recording
 
-Select with Storage Access Framework → validate and decode locally → audio quality → speech segmentation → optional Vosk transcript → transcript-context warnings → optional AASIST-L analysis → five separate result sections → delete immediately or explicitly retain metadata.
+Select with Storage Access Framework → validate and decode locally → audio quality → speech segmentation → optional Vosk transcript → transcript-context warnings → optional AASIST-L analysis → overall guidance followed by separate acoustic, scam-language, transcript, quality and technical sections → delete immediately or explicitly retain metadata.
 
 ### Live Protection
 

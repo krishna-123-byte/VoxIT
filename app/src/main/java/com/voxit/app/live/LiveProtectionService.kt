@@ -319,7 +319,7 @@ class LiveProtectionService : Service() {
         val pauseResume = servicePending(if (paused) ACTION_RESUME else ACTION_PAUSE, 2)
         val stop = servicePending(ACTION_STOP, 3)
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_voxit)
             .setContentTitle(if (alert) "VoxIT conversation warning" else "VoxIT Live Protection")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(if (alert) ALERT_TEXT else text))

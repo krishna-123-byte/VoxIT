@@ -96,7 +96,11 @@ AASIST-L is a binary bona-fide/spoof research model trained on ASVspoof 2019 LA.
 
 ## Phase 5: final prototype integration
 
-Version `1.0.0-prototype` brings the independent Phase 1–4 capabilities into one cautious workflow. Home reports English, Hindi, selected transcription, AASIST-L, Live Protection, and local-processing status without claiming unavailable features are ready. Model Manager is the single place to import, select, replace, inspect, and delete Vosk and voice-integrity models. Unsafe transcription-model changes remain blocked while Live Protection is active, and deletion never silently selects a different model.
+Version `1.1.0-prototype` brings the independent Phase 1–4 capabilities into one cautious workflow. Home reports English, Hindi, selected transcription, AASIST-L, Live Protection, and local-processing status without claiming unavailable features are ready. Model Manager is the single place to import, select, replace, inspect, and delete Vosk and voice-integrity models. Unsafe transcription-model changes remain blocked while Live Protection is active, and deletion never silently selects a different model.
+
+The official VoxIT artwork is used for the launcher, system and in-app splash experience, onboarding, Home, the Live Protection notification and optional overlay bubble. The full navy/electric-blue wordmark is shown on a restrained light surface so its original colours and raised `IT` remain legible; compact system surfaces use only the supplied V/waveform emblem.
+
+Uploaded results lead with plain-language overall guidance, then keep acoustic voice-integrity and transcript-based scam-language findings visibly separate. Missing models, missing transcripts, failed checks and insufficient speech are presented as incomplete or inconclusive—never as a green result. Raw AASIST-L output is secondary technical information and remains labelled an experimental uncalibrated score, not a real-world probability.
 
 Real uploaded results now keep five sections visibly separate: audio quality, transcript, scam-language/context risk, acoustic voice integrity, and overall safety guidance. The guidance explains its contributing signals; it is not a combined fraud probability. Speaker verification is explicitly not included. AASIST-L remains upload-only and its output remains an experimental, uncalibrated research score.
 

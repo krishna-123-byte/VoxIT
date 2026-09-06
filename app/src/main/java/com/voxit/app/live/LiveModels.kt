@@ -13,6 +13,42 @@ enum class LiveSessionStatus {
 
 enum class BubbleStatus { DISABLED, PERMISSION_REQUIRED, LISTENING, PAUSED, WARNING, ERROR, HIDDEN }
 
+enum class LiveHeadline(val label: String) {
+    MONITORING("MONITORING"),
+    NO_STRONG_SCAM_SIGNS("NO STRONG SCAM SIGNS"),
+    SUSPICIOUS_LANGUAGE("SUSPICIOUS LANGUAGE"),
+    HIGH_CAUTION("HIGH CAUTION"),
+    AUDIO_UNAVAILABLE("AUDIO UNAVAILABLE"),
+    PAUSED("PAUSED"),
+}
+
+data class LiveStatusPresentation(val headline: LiveHeadline, val reason: String)
+
+/** Presentation-only mapping. It does not alter rolling risk, alert thresholds, or service state. */
+object LiveStatusPresentationPolicy {
+    fun evaluate(state: LiveProtectionState): LiveStatusPresentation {
+        if (state.status == LiveSessionStatus.PAUSED) return LiveStatusPresentation(LiveHeadline.PAUSED, "Microphone processing is paused until you resume.")
+        if (state.status in setOf(LiveSessionStatus.AUDIO_UNAVAILABLE, LiveSessionStatus.AUDIO_BLOCKED, LiveSessionStatus.ERROR)) {
+            return LiveStatusPresentation(LiveHeadline.AUDIO_UNAVAILABLE, state.errorMessage ?: state.qualityExplanation)
+        }
+        val score = state.conversationRisk.score
+        if (state.status == LiveSessionStatus.ALERT || (score != null && score >= 70)) {
+            return LiveStatusPresentation(LiveHeadline.HIGH_CAUTION, state.conversationRisk.warnings.lastOrNull()?.category ?: "High-risk confirmed transcript context was detected.")
+        }
+        if ((score != null && score >= 35) || state.conversationRisk.warnings.isNotEmpty()) {
+            return LiveStatusPresentation(LiveHeadline.SUSPICIOUS_LANGUAGE, state.conversationRisk.warnings.lastOrNull()?.category ?: "Confirmed transcript language needs independent verification.")
+        }
+        if (state.confirmedTranscript.isNotEmpty() && score != null) {
+            return LiveStatusPresentation(LiveHeadline.NO_STRONG_SCAM_SIGNS, "No strong scam-language pattern was found in confirmed transcript context. This is not a safety guarantee.")
+        }
+        return LiveStatusPresentation(LiveHeadline.MONITORING, when {
+            !state.microphoneActive -> "Live Protection is ready when you explicitly start it."
+            state.transcriptionModel == null -> "Microphone audio is monitored, but fraud-language analysis cannot run without a transcript model."
+            else -> "Listening for usable speech and confirmed transcript context."
+        })
+    }
+}
+
 data class LiveWaveformPoint(val amplitude: Float, val speech: Boolean)
 
 data class LiveProtectionState(

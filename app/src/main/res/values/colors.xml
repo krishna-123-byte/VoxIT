@@ -7,4 +7,6 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="voxit_launcher_background">#FFE8F2FF</color>
+    <color name="voxit_system_splash_background">#FFF4F8FF</color>
 </resources>

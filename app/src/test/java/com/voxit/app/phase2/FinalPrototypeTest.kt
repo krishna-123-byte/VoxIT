@@ -3,6 +3,7 @@ package com.voxit.app.phase2
 import com.voxit.app.integrity.IntegrityConclusion
 import com.voxit.app.integrity.IntegrityModelMetadata
 import com.voxit.app.integrity.VoiceIntegrityResult
+import com.voxit.app.domain.TranscriptSegment
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -10,7 +11,7 @@ class FinalPrototypeTest {
     @Test fun missingModelsAreReviewNotFakeLowRisk() {
         val result = fixture(VoiceIntegrityResult.Unavailable("not installed"), null, RealAudioQuality.GOOD)
         val guidance = OverallGuidancePolicy.evaluate(result)
-        assertEquals(GuidanceLevel.REVIEW, guidance.level)
+        assertEquals(GuidanceLevel.INCOMPLETE, guidance.level)
         assertNull(result.manipulationScore)
         assertNull(result.conversationRisk.score)
     }
@@ -36,7 +37,7 @@ class FinalPrototypeTest {
         return RealAnalysisResult(
             AudioMetadata("not-persisted.wav", "audio/wav", 10, 4_000, 16_000, 1), emptyList(), listOf(SpeechRegion(0, 3_000)),
             AudioQualityMetrics(.1f, .2f, 0f, 0f, 3_000, .01f, quality), SignalFeatures(0f,0f,0f,0f,0f,0f,0f,0f,null,null),
-            emptyList(), ConversationRiskResult(scam, emptyList(), "test"), null, null, "not installed", manipulationScore = score, voiceIntegrity = integrity,
+            if (scam == null) emptyList() else listOf(TranscriptSegment("00:01", "fixture transcript", "English", confirmed = true)), ConversationRiskResult(scam, emptyList(), "test"), if (scam == null) null else "Vosk", null, "test", manipulationScore = score, voiceIntegrity = integrity,
         )
     }
 

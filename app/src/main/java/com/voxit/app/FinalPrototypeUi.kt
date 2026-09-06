@@ -120,6 +120,7 @@ fun FinalHistoryScreen(vm: Phase2ViewModel, onBack: () -> Unit) {
 fun HowVoxITWorksScreen(onBack: () -> Unit) {
     Scaffold(containerColor = Navy, topBar = { FinalTopBar("How VoxIT works", onBack) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            VoxITOfficialLogo(Modifier.fillMaxWidth().height(104.dp), "VoxIT logo in How VoxIT works")
             Text("Two workflows, separate evidence", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             FinalInfo("Uploaded recording → local decoding → audio quality → speech regions → optional Vosk transcript and scam-language analysis → optional AASIST-L acoustic analysis.")
             FinalInfo("Live Protection → explicit microphone start → foreground service → speech/quality monitoring → optional Vosk transcript → rolling scam-language warnings. Live AASIST-L inference is not enabled.")

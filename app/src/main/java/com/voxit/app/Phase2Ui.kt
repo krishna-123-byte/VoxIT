@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -23,6 +24,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -34,10 +39,13 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: () -> Unit) {
+fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: () -> Unit, onManageModels: () -> Unit) {
     val state by vm.uiState.collectAsState()
     val modelState by vm.modelState.collectAsState()
     val integrityState by vm.integrityModelState.collectAsState()
+    val modelCatalog by vm.modelCatalog.collectAsState()
+    val transcriptionReady = modelCatalog.readySelectedModel != null
+    val integrityReady = integrityState.status == IntegrityModelStatus.READY
     var importLanguage by rememberSaveable { mutableStateOf("English") }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::selectAudio) }
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importModel(it, importLanguage) } }
@@ -46,14 +54,16 @@ fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: ()
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Real uploaded-audio analysis", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("Audio stays on this device. Android's secure file picker supplies the content URI directly.", color = SignalMuted)
+            CheckAvailabilityCard(transcriptionReady, integrityReady, onManageModels)
             OutlinedButton(onClick = { audioPicker.launch(arrayOf("audio/wav", "audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/*")) }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Select Audio File") }
             when (val current = state) {
                 Phase2UiState.Idle -> Phase2Info("No recording selected.")
                 is Phase2UiState.FileSelected -> SelectedFileCard(current.file)
                 is Phase2UiState.Working -> {
-                    Text(current.stage.label, fontWeight = FontWeight.SemiBold)
+                    Text(current.stage.userLabel(), fontWeight = FontWeight.SemiBold)
                     LinearProgressIndicator(progress = { current.stage.progress }, modifier = Modifier.fillMaxWidth())
                     Text("${(current.stage.progress * 100).roundToInt()}%", color = SignalMuted)
+                    UploadStageSummary(current.stage, transcriptionReady, integrityReady)
                     OutlinedButton(onClick = vm::cancelAnalysis, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Cancel Processing") }
                 }
                 Phase2UiState.Cancelled -> { Phase2Info("Processing cancelled. Decoder and file resources were released.", Amber); RetryActions(vm, audioPicker) }
@@ -92,12 +102,129 @@ fun Phase2UploadScreen(vm: Phase2ViewModel, onBack: () -> Unit, onOpenResult: ()
 }
 
 @Composable
-fun Phase2RealResultScreen(vm: Phase2ViewModel, onBack: () -> Unit) {
+fun Phase2RealResultScreen(vm: Phase2ViewModel, onBack: () -> Unit, onManageModels: () -> Unit) {
     val state by vm.uiState.collectAsState()
     val result = when (val current = state) { is Phase2UiState.Complete -> current.result; is Phase2UiState.ModelRequired -> current.result; else -> null }
     Scaffold(containerColor = Navy, topBar = { Phase2TopBar("Real audio result", onBack) }) { padding ->
         if (result == null) Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("No real audio result is available.") }
-        else RealResultContent(result, vm, Modifier.padding(padding))
+        else RealResultContentV11(result, vm, onManageModels, Modifier.padding(padding))
+    }
+}
+
+@Composable
+private fun RealResultContentV11(
+    result: RealAnalysisResult,
+    vm: Phase2ViewModel,
+    onManageModels: () -> Unit,
+    modifier: Modifier,
+) {
+    var selectedTime by rememberSaveable { mutableLongStateOf(0L) }
+    var search by rememberSaveable { mutableStateOf("") }
+    var retained by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var showTechnical by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val presentation = ResultPresentationPolicy.evaluate(result)
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete this analysis?") },
+        text = { Text("The in-memory result and transcript will be cleared. The original recording is never copied into VoxIT storage.") },
+        confirmButton = { Button(onClick = { confirmDelete = false; vm.reset() }) { Text("Delete") } },
+        dismissButton = { OutlinedButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
+    Column(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("REAL MODE • ON-DEVICE ANALYSIS", color = SignalBlue, fontWeight = FontWeight.Bold)
+        Text(result.metadata.fileName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+
+        val overallColor = presentation.overall.level.outcomeColor()
+        OutcomeCard(
+            title = "Overall guidance",
+            heading = presentation.overall.level.label,
+            description = presentation.overall.level.description(),
+            symbol = presentation.overall.level.symbol(),
+            accent = overallColor,
+            reasons = presentation.overall.reasons,
+            announce = true,
+        )
+
+        OutcomeCard(
+            title = "Voice-integrity result",
+            heading = presentation.voice.label,
+            description = presentation.voice.description,
+            symbol = presentation.voice.symbol(),
+            accent = presentation.voice.outcomeColor(),
+        )
+        if (presentation.voice == VoiceResultState.NOT_PERFORMED) {
+            OutlinedButton(onClick = onManageModels, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Manage models") }
+        }
+
+        OutcomeCard(
+            title = "Fraud & scam warning",
+            heading = presentation.fraud.label,
+            description = presentation.fraud.description,
+            symbol = presentation.fraud.symbol(),
+            accent = presentation.fraud.outcomeColor(),
+        )
+
+        RecommendedActionPanel(presentation.overall.level)
+
+        SectionHeading("Transcript")
+        Text("Transcript not saved", color = SafeGreen, fontWeight = FontWeight.SemiBold)
+        Text(result.transcriptionMessage, color = SignalMuted)
+        if (result.transcript.isEmpty()) {
+            Phase2Info("No transcript is available. Fraud-language analysis was not performed, and no green fraud conclusion is shown.", SignalMuted)
+        } else {
+            OutlinedTextField(value = search, onValueChange = { search = it }, label = { Text("Search transcript") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            result.transcript.filter { search.isBlank() || it.text.contains(search, true) }.forEach { segment ->
+                val suspicious = result.conversationRisk.warnings.any { it.timestamp == segment.timestamp }
+                Card(colors = CardDefaults.cardColors(containerColor = if (suspicious) AlertRed.copy(.16f) else MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth().clickable { selectedTime = segment.startMs }) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("${segment.timestamp} • ${segment.language} • confirmed", color = SignalMuted, fontSize = 12.sp)
+                        Text(segment.text, fontWeight = if (suspicious) FontWeight.SemiBold else FontWeight.Normal)
+                        if (suspicious) Text("Suspicious context highlighted", color = AlertRed, fontSize = 12.sp)
+                    }
+                }
+            }
+            result.conversationRisk.warnings.forEach { warning -> WarningCard(warning) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    val text = result.transcript.joinToString("\n") { "${it.timestamp} ${it.text}" }
+                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("VoxIT transcript", text))
+                }, modifier = Modifier.weight(1f).heightIn(min = 50.dp)) { Text("Copy") }
+                OutlinedButton(onClick = vm::deleteTranscript, modifier = Modifier.weight(1f).heightIn(min = 50.dp)) { Text("Delete") }
+            }
+        }
+
+        SectionHeading("Audio quality")
+        Phase2Info("${result.quality.quality.label}: ${result.quality.quality.explanation}", qualityColor(result.quality.quality))
+        RealWaveform(result.waveform, selectedTime) { selectedTime = it }
+        Text("Seek preview: ${formatTime(selectedTime)} • teal bars are detected speech; muted bars are silence.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+
+        OutlinedButton(
+            onClick = { showTechnical = !showTechnical },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).semantics { contentDescription = if (showTechnical) "Hide technical details" else "View technical details" },
+        ) { Text(if (showTechnical) "Hide technical details" else "View technical details") }
+        if (showTechnical) {
+            SectionHeading("Technical details")
+            MetadataCard(result.metadata)
+            MetricsCard(result)
+            TechnicalIntegrityDetails(result.voiceIntegrity)
+            Text("Transcription model", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+            Text(if (result.transcriptionModel == null) "Unavailable" else "${result.transcriptionModel} • ${result.transcriptionVersion}")
+            Text("Experimental audio information", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+            SignalCard(result.features)
+            Text("Spectral observations are not proof of AI generation and do not affect the AASIST-L result.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+            Phase2Info("Speaker verification not included in this prototype", SignalMuted)
+        }
+
+        Text("Limitations", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+        Phase2Info("Acoustic integrity and transcript scam analysis are separate warnings. AASIST-L is an uncalibrated binary bona-fide/spoof research model, not a fraud probability or reliable subtype classifier.")
+        Button(onClick = { retained = vm.retainCurrentResult() }, enabled = !retained, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text(if (retained) "Result metadata retained locally" else "Retain result metadata locally") }
+        Text("Retains only duration, quality, detector conclusions/scores, model names, and time—not filename, URI, audio, PCM, or transcript.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Delete result and transcript") }
     }
 }
 
@@ -154,7 +281,7 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
         IntegrityResultCard(result.voiceIntegrity)
         Phase2Info("Speaker verification not included in this prototype", SignalMuted)
         Text("5. Overall safety guidance", color = SignalBlue, fontWeight = FontWeight.SemiBold)
-        Phase2Info(guidance.level.label, when (guidance.level) { GuidanceLevel.NO_STRONG_WARNING -> SafeGreen; GuidanceLevel.REVIEW -> Amber; GuidanceLevel.HIGH_CAUTION -> AlertRed })
+        Phase2Info(guidance.level.label, when (guidance.level) { GuidanceLevel.NO_STRONG_WARNING -> SafeGreen; GuidanceLevel.REVIEW -> Amber; GuidanceLevel.HIGH_CAUTION -> AlertRed; GuidanceLevel.INCOMPLETE -> SignalMuted })
         guidance.reasons.forEach { Text("• $it", color = SignalMuted) }
         Text("This guidance is not a fraud probability. It explains independent acoustic, transcript, and quality signals; unavailable detectors are never treated as zero risk.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
         Text("Limitations", color = SignalBlue, fontWeight = FontWeight.SemiBold)
@@ -171,6 +298,52 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
 @Composable private fun RetryActions(vm: Phase2ViewModel, picker: androidx.activity.result.ActivityResultLauncher<Array<String>>) { OutlinedButton(onClick = vm::retry, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Retry") }; OutlinedButton(onClick = { vm.reset(); picker.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Select Another File") } }
 @Composable private fun SelectedFileCard(file: SelectedAudio) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(file.name, fontWeight = FontWeight.SemiBold); Text("${file.mimeType} • ${formatBytes(file.sizeBytes)}", color = SignalMuted) } }
 @Composable private fun ResultReadyCard(result: RealAnalysisResult, message: String) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(message, fontWeight = FontWeight.SemiBold); Text("${formatDuration(result.metadata.durationMs)} • ${result.metadata.sampleRate} Hz • ${result.metadata.channelCount} channel(s)", color = SignalMuted); Text("${result.speechRegions.size} speech region(s) • ${formatDuration(result.quality.usableSpeechMs)} usable speech", color = SignalMuted) } }
+
+@Composable
+private fun CheckAvailabilityCard(transcriptionReady: Boolean, integrityReady: Boolean, onManageModels: () -> Unit) = Card(
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Checks available before analysis" },
+) {
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Checks available for this recording", fontWeight = FontWeight.Bold)
+        Phase2Detail("Transcription", if (transcriptionReady) "Ready" else "Unavailable")
+        Phase2Detail("Fraud-language analysis", if (transcriptionReady) "Ready" else "Unavailable")
+        Phase2Detail("AI voice-integrity analysis", if (integrityReady) "Ready" else "Unavailable")
+        Text("Available checks run independently. Transcript risk never becomes an AI-voice result.", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+        if (!transcriptionReady || !integrityReady) OutlinedButton(onClick = onManageModels, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Manage models") }
+    }
+}
+
+@Composable
+private fun UploadStageSummary(stage: PipelineStage, transcriptionReady: Boolean, integrityReady: Boolean) {
+    val rows = listOf(
+        "Preparing recording" to stage.isOneOf(PipelineStage.OPENING, PipelineStage.VALIDATING, PipelineStage.DECODING, PipelineStage.PREPARING),
+        "Finding speech" to stage.isOneOf(PipelineStage.DETECTING_SPEECH, PipelineStage.EXTRACTING),
+        "Transcribing speech" to stage.isOneOf(PipelineStage.LOADING_MODEL, PipelineStage.TRANSCRIBING),
+        "Checking scam-language indicators" to (stage == PipelineStage.ANALYSING_TRANSCRIPT),
+        "Checking voice integrity" to (stage == PipelineStage.VOICE_INTEGRITY),
+        "Preparing result" to (stage == PipelineStage.PREPARING_RESULT || stage == PipelineStage.COMPLETE),
+    )
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            rows.forEach { (label, active) ->
+                val skipped = (label == "Transcribing speech" || label == "Checking scam-language indicators") && !transcriptionReady ||
+                    label == "Checking voice integrity" && !integrityReady
+                Phase2Detail(label, when { active -> "In progress"; skipped -> "Skipped — model unavailable"; else -> "Queued" })
+            }
+        }
+    }
+}
+
+private fun PipelineStage.isOneOf(vararg stages: PipelineStage) = stages.contains(this)
+private fun PipelineStage.userLabel() = when (this) {
+    PipelineStage.OPENING, PipelineStage.VALIDATING, PipelineStage.DECODING, PipelineStage.PREPARING -> "Preparing recording"
+    PipelineStage.DETECTING_SPEECH, PipelineStage.EXTRACTING -> "Finding speech"
+    PipelineStage.LOADING_MODEL, PipelineStage.TRANSCRIBING -> "Transcribing speech"
+    PipelineStage.ANALYSING_TRANSCRIPT -> "Checking scam-language indicators"
+    PipelineStage.VOICE_INTEGRITY -> "Checking voice integrity"
+    PipelineStage.PREPARING_RESULT, PipelineStage.COMPLETE -> "Preparing result"
+}
 @Composable private fun ModelStatus(state: ModelImportState) = when (state) { ModelImportState.Idle -> Phase2Info("No offline transcription model installed.", Amber); is ModelImportState.Importing -> Column { LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth()); Text("Importing and validating model… ${(state.progress * 100).roundToInt()}%", color = SignalMuted) }; is ModelImportState.Ready -> Phase2Info("Selected: ${state.model.displayName} • ${state.model.language}\nModel ID: ${state.model.id}\nPrivate path: ${state.model.pathIdentifier}", SafeGreen); is ModelImportState.Error -> Phase2Info(state.message, AlertRed) }
 
 @Composable private fun ModelChooser(vm: Phase2ViewModel) {
@@ -227,6 +400,102 @@ private fun RealResultContent(result: RealAnalysisResult, vm: Phase2ViewModel, m
         }
     }
 }
+
+@Composable
+private fun OutcomeCard(
+    title: String,
+    heading: String,
+    description: String,
+    symbol: String,
+    accent: androidx.compose.ui.graphics.Color,
+    reasons: List<String> = emptyList(),
+    announce: Boolean = false,
+) = Card(
+    colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = .14f)),
+    modifier = Modifier.fillMaxWidth().semantics {
+        contentDescription = "$title. $heading. $description"
+        if (announce) liveRegion = LiveRegionMode.Polite
+    },
+) {
+    Row(Modifier.padding(18.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.size(44.dp).background(accent.copy(alpha = .22f), CircleShape), contentAlignment = Alignment.Center) {
+            Text(symbol, color = accent, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, color = SignalMuted, style = MaterialTheme.typography.labelLarge)
+            Text(heading, color = accent, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(description, color = Mist)
+            reasons.forEach { Text("• $it", color = SignalMuted, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+@Composable
+private fun RecommendedActionPanel(level: GuidanceLevel) = Card(
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    modifier = Modifier.fillMaxWidth(),
+) {
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text("What should you do?", color = SignalBlue, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        val actions = when (level) {
+            GuidanceLevel.HIGH_CAUTION, GuidanceLevel.REVIEW -> listOf(
+                "Do not share an OTP, PIN, password, or banking information.",
+                "Do not transfer money because of urgency or pressure.",
+                "Verify the person using a trusted number or another communication method.",
+                "Contact the organisation through its official app or website.",
+                "Stop the conversation if you feel pressured.",
+            )
+            GuidanceLevel.INCOMPLETE -> listOf(
+                "Treat the missing checks as unknown—not as a safe result.",
+                "Try a clearer recording or install the required on-device model.",
+                "Verify important requests using a trusted independent channel.",
+            )
+            GuidanceLevel.NO_STRONG_WARNING -> listOf(
+                "No detector provides a guarantee. Verify important or unusual requests independently.",
+                "Never share security credentials or payment details because of pressure.",
+            )
+        }
+        actions.forEach { Text("• $it", color = Mist) }
+    }
+}
+
+@Composable
+private fun TechnicalIntegrityDetails(result: VoiceIntegrityResult) {
+    Text("Voice-integrity model", color = SignalBlue, fontWeight = FontWeight.SemiBold)
+    when (result) {
+        is VoiceIntegrityResult.Unavailable -> Phase2Info("Not performed — ${result.reason}", SignalMuted)
+        is VoiceIntegrityResult.Failed -> Phase2Info("Analysis failed — ${result.reason}", AlertRed)
+        is VoiceIntegrityResult.Available -> Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Phase2Detail("Experimental uncalibrated model score", "${result.score}/100 — not a real-world probability")
+                Phase2Detail("Classification threshold", "${(result.threshold * 100).toInt()}/100")
+                Phase2Detail("Confidence", "${result.confidence}/100")
+                Phase2Detail("Valid windows analysed", result.validWindows.toString())
+                Phase2Detail("Window agreement", "${(result.agreement * 100).toInt()}/100")
+                Phase2Detail("Speech analysed", formatDuration(result.analysedSpeechMs))
+                Phase2Detail("Processing duration", "load ${result.initializationMs} ms • mean window ${result.meanInferenceMs} ms")
+                Text("${result.model.name} • ${result.model.version} • ${result.model.licence}", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+                Text(result.calibration, color = Amber, style = MaterialTheme.typography.bodySmall)
+                Text(result.limitations, color = SignalMuted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable private fun SectionHeading(text: String) = Text(text, color = SignalBlue, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+private fun GuidanceLevel.description() = when (this) {
+    GuidanceLevel.HIGH_CAUTION -> "Strong warning evidence exists in one or more completed checks. Review the independent reasons below."
+    GuidanceLevel.REVIEW -> "The available checks contain mixed, uncertain, suspicious, or quality-limited evidence."
+    GuidanceLevel.NO_STRONG_WARNING -> "No strong warning was found by the completed checks. This does not guarantee that the speaker or request is safe. Verify important requests independently."
+    GuidanceLevel.INCOMPLETE -> "One or more checks could not run. Missing or failed analysis is unknown and is never treated as safe."
+}
+private fun GuidanceLevel.symbol() = when (this) { GuidanceLevel.HIGH_CAUTION -> "!"; GuidanceLevel.REVIEW -> "?"; GuidanceLevel.NO_STRONG_WARNING -> "✓"; GuidanceLevel.INCOMPLETE -> "—" }
+private fun GuidanceLevel.outcomeColor() = when (this) { GuidanceLevel.HIGH_CAUTION -> AlertRed; GuidanceLevel.REVIEW -> Amber; GuidanceLevel.NO_STRONG_WARNING -> SafeGreen; GuidanceLevel.INCOMPLETE -> SignalMuted }
+private fun VoiceResultState.symbol() = when (this) { VoiceResultState.LIKELY_MANIPULATED, VoiceResultState.FAILED -> "!"; VoiceResultState.LIKELY_HUMAN -> "✓"; VoiceResultState.INCONCLUSIVE -> "?"; VoiceResultState.NOT_PERFORMED -> "—" }
+private fun VoiceResultState.outcomeColor() = when (this) { VoiceResultState.LIKELY_MANIPULATED, VoiceResultState.FAILED -> AlertRed; VoiceResultState.LIKELY_HUMAN -> SafeGreen; VoiceResultState.INCONCLUSIVE -> Amber; VoiceResultState.NOT_PERFORMED -> SignalMuted }
+private fun FraudResultState.symbol() = when (this) { FraudResultState.HIGH_RISK -> "!"; FraudResultState.SUSPICIOUS, FraudResultState.INCONCLUSIVE -> "?"; FraudResultState.NO_STRONG_LANGUAGE -> "✓"; FraudResultState.NOT_PERFORMED -> "—" }
+private fun FraudResultState.outcomeColor() = when (this) { FraudResultState.HIGH_RISK -> AlertRed; FraudResultState.SUSPICIOUS, FraudResultState.INCONCLUSIVE -> Amber; FraudResultState.NO_STRONG_LANGUAGE -> SafeGreen; FraudResultState.NOT_PERFORMED -> SignalMuted }
 @Composable private fun Phase2Score(title: String, value: String, detail: String, modifier: Modifier) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = modifier) { Column(Modifier.padding(10.dp)) { Text(title, color = SignalMuted, fontSize = 11.sp); Text(value, fontWeight = FontWeight.Bold, fontSize = if (value.length < 4) 26.sp else 14.sp); Text(detail, color = SignalMuted, fontSize = 10.sp) } }
 @Composable private fun SignalCard(features: SignalFeatures) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Phase2Detail("Zero-crossing rate", "%.4f".format(features.zeroCrossingRate)); Phase2Detail("Spectral centroid", "%.0f Hz".format(features.spectralCentroidHz)); Phase2Detail("Spectral roll-off", "%.0f Hz".format(features.spectralRolloffHz)); Phase2Detail("Spectral flatness", "%.3f".format(features.spectralFlatness)); Phase2Detail("Spectrum", "Low %.0f%% • Mid %.0f%% • High %.0f%%".format(features.lowBandPercent, features.midBandPercent, features.highBandPercent)); Phase2Detail("Pitch", features.pitchHz?.let { "%.1f Hz".format(it) } ?: "Unavailable"); Phase2Detail("Pitch stability", features.pitchStability?.toString() ?: "Insufficient observations") } }
 @Composable private fun WarningCard(warning: TranscriptWarning) = Card(colors = CardDefaults.cardColors(containerColor = AlertRed.copy(.15f)), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("${warning.timestamp} • ${warning.category}", color = AlertRed, fontWeight = FontWeight.SemiBold); Text(warning.evidence); Text(warning.explanation, color = SignalMuted); Text("Confidence ${warning.confidence}% • ${warning.detectorMode}", color = SignalMuted, fontSize = 12.sp) } }

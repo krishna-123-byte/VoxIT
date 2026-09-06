@@ -22,7 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -104,12 +106,11 @@ fun LiveProtectionScreen(
     if (state.status == LiveSessionStatus.ALERT && state.alertSequence > lastAlertShown) {
         AlertDialog(
             onDismissRequest = { lastAlertShown = state.alertSequence; vm.continueMonitoring() },
-            title = { Text("Verify before sharing") },
-            text = { Text(LiveProtectionService.ALERT_TEXT) },
-            confirmButton = { Button(onClick = { lastAlertShown = state.alertSequence; vm.continueMonitoring() }) { Text("Continue Monitoring") } },
+            title = { Text("Potential scam indicators detected") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(state.conversationRisk.warnings.lastOrNull()?.category ?: "Suspicious confirmed transcript context"); Text(LiveProtectionService.ALERT_TEXT) } },
+            confirmButton = { Button(onClick = { lastAlertShown = state.alertSequence; vm.continueMonitoring() }) { Text("Continue monitoring") } },
             dismissButton = { Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
-                OutlinedButton(onClick = { lastAlertShown = state.alertSequence; vm.pause() }) { Text("Pause") }
-                OutlinedButton(onClick = { lastAlertShown = state.alertSequence; vm.stop() }) { Text("Stop Monitoring") }
+                OutlinedButton(onClick = { lastAlertShown = state.alertSequence; vm.stop() }) { Text("Stop monitoring") }
                 OutlinedButton(onClick = { context.startActivity(Intent(Intent.ACTION_DIAL)) }) { Text("Verify Caller") }
                 OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) }) { Text("Open Phone Controls") }
             } },
@@ -119,9 +120,10 @@ fun LiveProtectionScreen(
     Scaffold(containerColor = Navy, topBar = { LiveTopBar(onBack) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("User-started Live Protection", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            LiveAtGlanceCard(state)
+            LiveInfo("Live AI-voice analysis is not included in this prototype. Live Protection currently checks microphone availability, speech, transcription, and scam-language indicators.", SignalBlue)
             LiveInfo(state.sourceNotice, Amber)
             permissionNote?.let { LiveInfo(it, SignalBlue) }
-            LiveStatusCard(state)
             LiveWaveform(state.waveform)
             Text("Recent real microphone waveform • teal indicates detected speech", color = SignalMuted, style = MaterialTheme.typography.bodySmall)
             LiveQualityCard(state)
@@ -157,10 +159,7 @@ fun LiveProtectionScreen(
                     Column(Modifier.padding(12.dp)) { Text("${warning.timestamp} • ${warning.category}", color = AlertRed, fontWeight = FontWeight.SemiBold); Text(warning.evidence); Text(warning.explanation, color = SignalMuted); Text("Confidence ${warning.confidence}% • ${warning.detectorMode}", color = SignalMuted, fontSize = 11.sp) }
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LiveDetectorCard("Voice manipulation", "Unavailable", "Uploaded-recording detector only", Modifier.weight(1f))
-                LiveDetectorCard("Scam risk", state.conversationRisk.score?.toString() ?: "Unavailable", if (state.conversationRisk.score == null) "Needs confirmed transcript" else "Rolling 60-second window", Modifier.weight(1f))
-            }
+            LiveDetectorCard("Live AI-voice analysis", "Not included", "AASIST-L runs only for uploaded recordings", Modifier.fillMaxWidth())
             LiveInfo("Speaker verification not included in this prototype", SignalMuted)
 
             Text("Floating bubble", color = SignalBlue, fontWeight = FontWeight.SemiBold)
@@ -189,6 +188,48 @@ fun LiveProtectionScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun LiveTopBar(onBack: () -> Unit) = CenterAlignedTopAppBar(title = { Text("Live Protection", fontWeight = FontWeight.SemiBold) }, navigationIcon = { OutlinedButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp)) { Text("Back") } }, colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Navy))
+
+@Composable private fun LiveAtGlanceCard(state: LiveProtectionState) {
+    val presentation = LiveStatusPresentationPolicy.evaluate(state)
+    val accent = when (presentation.headline) {
+        LiveHeadline.HIGH_CAUTION -> AlertRed
+        LiveHeadline.SUSPICIOUS_LANGUAGE -> Amber
+        LiveHeadline.NO_STRONG_SCAM_SIGNS -> SafeGreen
+        LiveHeadline.AUDIO_UNAVAILABLE -> SignalMuted
+        LiveHeadline.PAUSED -> Amber
+        LiveHeadline.MONITORING -> SignalBlue
+    }
+    val symbol = when (presentation.headline) {
+        LiveHeadline.HIGH_CAUTION -> "!"
+        LiveHeadline.SUSPICIOUS_LANGUAGE -> "?"
+        LiveHeadline.NO_STRONG_SCAM_SIGNS -> "✓"
+        LiveHeadline.AUDIO_UNAVAILABLE -> "—"
+        LiveHeadline.PAUSED -> "Ⅱ"
+        LiveHeadline.MONITORING -> "●"
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = .14f)),
+        modifier = Modifier.fillMaxWidth().semantics {
+            contentDescription = "Live Protection status. ${presentation.headline.label}. ${presentation.reason}"
+            liveRegion = LiveRegionMode.Polite
+        },
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Box(Modifier.size(42.dp).background(accent.copy(alpha = .22f), androidx.compose.foundation.shape.CircleShape), contentAlignment = androidx.compose.ui.Alignment.Center) { Text(symbol, color = accent, fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+                Text(presentation.headline.label, color = accent, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            }
+            Text(presentation.reason)
+            LiveDetail("Microphone", if (state.microphoneActive) "Active" else "Inactive")
+            LiveDetail("Transcription", state.transcriptionStatus)
+            LiveDetail("Selected language model", state.transcriptionModel?.let { "$it • ${state.transcriptionLanguage ?: "language unavailable"}" } ?: "Unavailable")
+            LiveDetail("Elapsed", liveTime(state.elapsedMs))
+            LiveDetail("Usable speech", liveTime(state.usableSpeechMs))
+            LiveDetail("Speech state", if (state.speechDetected) "Speech detected" else "Silence / listening")
+            state.conversationRisk.warnings.lastOrNull()?.let { LiveDetail("Latest warning", it.category) }
+        }
+    }
+}
 
 @Composable private fun LiveStatusCard(state: LiveProtectionState) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { LiveDetail("Status", state.status.label()); LiveDetail("Microphone", if (state.microphoneActive) "Active — visible foreground service" else "Inactive"); LiveDetail("Elapsed", liveTime(state.elapsedMs)); LiveDetail("Usable speech", liveTime(state.usableSpeechMs)); LiveDetail("Signal", if (state.speechDetected) "Speech detected" else "Silence / listening") } }
 @Composable private fun LiveQualityCard(state: LiveProtectionState) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("Audio quality: ${state.quality.label}", color = state.quality.color(), fontWeight = FontWeight.SemiBold); Text(state.qualityExplanation, color = SignalMuted); LiveDetail("RMS", "%.4f".format(state.rms)); LiveDetail("Clipping", "%.2f%%".format(state.clippingPercent)) } }

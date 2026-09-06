@@ -14,8 +14,8 @@ android {
         applicationId = "com.voxit.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.0-prototype"
+        versionCode = 6
+        versionName = "1.1.0-prototype"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

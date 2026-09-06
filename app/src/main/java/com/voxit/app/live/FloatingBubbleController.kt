@@ -11,8 +11,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
 import com.voxit.app.MainActivity
+import com.voxit.app.R
 import kotlin.math.abs
 
 class FloatingBubbleController(
@@ -21,7 +24,8 @@ class FloatingBubbleController(
 ) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var root: LinearLayout? = null
-    private var icon: TextView? = null
+    private var icon: FrameLayout? = null
+    private var statusMark: TextView? = null
     private var controls: LinearLayout? = null
     private var parameters: WindowManager.LayoutParams? = null
 
@@ -34,15 +38,22 @@ class FloatingBubbleController(
             setPadding(8, 8, 8, 8)
             background = rounded(Color.rgb(10, 25, 48), 24f)
         }
-        val badge = TextView(context).apply {
-            text = "Voxᴵᵀ"
-            textSize = 15f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(24, 20, 24, 20)
+        val badge = FrameLayout(context).apply {
             contentDescription = "VoxIT Live Protection bubble"
-            background = rounded(Color.rgb(39, 170, 210), 80f)
+            background = rounded(Color.rgb(232, 242, 255), 80f, Color.rgb(39, 170, 210))
+            layoutParams = LinearLayout.LayoutParams(dp(72), dp(72))
         }
+        val emblem = ImageView(context).apply {
+            setImageResource(R.drawable.voxit_emblem)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            contentDescription = "VoxIT waveform emblem"
+        }
+        badge.addView(emblem, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER))
+        val indicator = TextView(context).apply {
+            text = "●"; textSize = 12f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(39, 170, 210), 40f)
+        }
+        badge.addView(indicator, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.END or Gravity.BOTTOM))
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -62,22 +73,27 @@ class FloatingBubbleController(
         badge.setOnTouchListener(DragTouchListener(panel, params) { actions.visibility = if (actions.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
         return try {
             windowManager.addView(panel, params)
-            root = panel; icon = badge; controls = actions; parameters = params
+            root = panel; icon = badge; statusMark = indicator; controls = actions; parameters = params
             true
         } catch (_: Exception) { root = null; false }
     }
 
     fun update(status: BubbleStatus) {
         if (!Settings.canDrawOverlays(context)) { hide(); return }
+        val accent = when (status) { BubbleStatus.WARNING, BubbleStatus.ERROR -> Color.rgb(210, 74, 64); BubbleStatus.PAUSED -> Color.rgb(221, 145, 45); else -> Color.rgb(39, 170, 210) }
         icon?.apply {
-            text = when (status) { BubbleStatus.PAUSED -> "Voxᴵᵀ Ⅱ"; BubbleStatus.WARNING -> "Voxᴵᵀ !"; BubbleStatus.ERROR -> "Voxᴵᵀ ×"; else -> "Voxᴵᵀ" }
-            background = rounded(when (status) { BubbleStatus.WARNING, BubbleStatus.ERROR -> Color.rgb(210, 74, 64); BubbleStatus.PAUSED -> Color.rgb(221, 145, 45); else -> Color.rgb(39, 170, 210) }, 80f)
+            contentDescription = "VoxIT Live Protection bubble: ${status.name.lowercase().replace('_', ' ')}"
+            background = rounded(Color.rgb(232, 242, 255), 80f, accent)
+        }
+        statusMark?.apply {
+            text = when (status) { BubbleStatus.PAUSED -> "Ⅱ"; BubbleStatus.WARNING -> "!"; BubbleStatus.ERROR -> "×"; else -> "●" }
+            background = rounded(accent, 40f)
         }
     }
 
     fun hide() {
         root?.let { try { windowManager.removeViewImmediate(it) } catch (_: Exception) { } }
-        root = null; icon = null; controls = null; parameters = null
+        root = null; icon = null; statusMark = null; controls = null; parameters = null
     }
 
     fun isShowing(): Boolean = root != null
@@ -94,7 +110,10 @@ class FloatingBubbleController(
         setPadding(18, 16, 18, 16); setOnClickListener { block() }
     }
 
-    private fun rounded(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius }
+    private fun rounded(color: Int, radius: Float, strokeColor: Int? = null) = GradientDrawable().apply {
+        setColor(color); cornerRadius = radius; strokeColor?.let { setStroke(dp(2), it) }
+    }
+    private fun dp(value: Int) = (value * context.resources.displayMetrics.density).toInt()
 
     private inner class DragTouchListener(
         private val view: View,

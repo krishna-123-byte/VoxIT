@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.VoxIT" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/voxit_system_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/voxit_adaptive_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/voxit_launcher_background</item>
+    </style>
+</resources>
