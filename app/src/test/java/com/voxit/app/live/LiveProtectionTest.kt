@@ -13,6 +13,12 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class LiveProtectionTest {
+    @Test fun microphoneForegroundServiceTypeStartsAtAndroid11() {
+        assertFalse(ForegroundServiceApiPolicy.supportsMicrophoneType(29))
+        assertTrue(ForegroundServiceApiPolicy.supportsMicrophoneType(30))
+        assertTrue(ForegroundServiceApiPolicy.supportsMicrophoneType(36))
+    }
+
     @Test fun permissionDenialStatesAreExplicit() {
         assertEquals(LiveSessionStatus.PERMISSION_REQUIRED, LivePermissionPolicy.microphoneState(false, true).first)
         assertTrue(LivePermissionPolicy.microphoneState(false, false).second.contains("app settings"))

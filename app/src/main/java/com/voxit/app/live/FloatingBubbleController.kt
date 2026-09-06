@@ -38,7 +38,7 @@ class FloatingBubbleController(
             setPadding(8, 8, 8, 8)
             background = rounded(Color.rgb(10, 25, 48), 24f)
         }
-        val badge = FrameLayout(context).apply {
+        val badge = AccessibleBubbleFrameLayout(context).apply {
             contentDescription = "VoxIT Live Protection bubble"
             background = rounded(Color.rgb(232, 242, 255), 80f, Color.rgb(39, 170, 210))
             layoutParams = LinearLayout.LayoutParams(dp(72), dp(72))
@@ -70,7 +70,10 @@ class FloatingBubbleController(
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.TOP or Gravity.START; x = 24; y = 280 }
-        badge.setOnTouchListener(DragTouchListener(panel, params) { actions.visibility = if (actions.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
+        badge.setOnClickListener {
+            actions.visibility = if (actions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        badge.setOnTouchListener(DragTouchListener(panel, params))
         return try {
             windowManager.addView(panel, params)
             root = panel; icon = badge; statusMark = indicator; controls = actions; parameters = params
@@ -118,7 +121,6 @@ class FloatingBubbleController(
     private inner class DragTouchListener(
         private val view: View,
         private val params: WindowManager.LayoutParams,
-        private val onTap: () -> Unit,
     ) : View.OnTouchListener {
         private var initialX = 0; private var initialY = 0; private var downX = 0f; private var downY = 0f
         override fun onTouch(ignored: View?, event: MotionEvent): Boolean {
@@ -131,9 +133,18 @@ class FloatingBubbleController(
                     try { windowManager.updateViewLayout(view, params) } catch (_: Exception) { hide() }
                     return true
                 }
-                MotionEvent.ACTION_UP -> { if (abs(event.rawX - downX) < 12 && abs(event.rawY - downY) < 12) onTap(); return true }
+                MotionEvent.ACTION_UP -> {
+                    if (abs(event.rawX - downX) < 12 && abs(event.rawY - downY) < 12) {
+                        ignored?.performClick()
+                    }
+                    return true
+                }
             }
             return false
         }
     }
+}
+
+internal class AccessibleBubbleFrameLayout(context: Context) : FrameLayout(context) {
+    override fun performClick(): Boolean = super.performClick()
 }

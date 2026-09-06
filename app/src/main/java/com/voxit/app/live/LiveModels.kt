@@ -28,7 +28,13 @@ data class LiveStatusPresentation(val headline: LiveHeadline, val reason: String
 object LiveStatusPresentationPolicy {
     fun evaluate(state: LiveProtectionState): LiveStatusPresentation {
         if (state.status == LiveSessionStatus.PAUSED) return LiveStatusPresentation(LiveHeadline.PAUSED, "Microphone processing is paused until you resume.")
-        if (state.status in setOf(LiveSessionStatus.AUDIO_UNAVAILABLE, LiveSessionStatus.AUDIO_BLOCKED, LiveSessionStatus.ERROR)) {
+        if (state.status in setOf(
+                LiveSessionStatus.PERMISSION_REQUIRED,
+                LiveSessionStatus.AUDIO_UNAVAILABLE,
+                LiveSessionStatus.AUDIO_BLOCKED,
+                LiveSessionStatus.ERROR,
+            )
+        ) {
             return LiveStatusPresentation(LiveHeadline.AUDIO_UNAVAILABLE, state.errorMessage ?: state.qualityExplanation)
         }
         val score = state.conversationRisk.score

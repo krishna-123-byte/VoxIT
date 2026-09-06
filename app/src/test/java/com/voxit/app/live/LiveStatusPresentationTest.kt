@@ -29,4 +29,14 @@ class LiveStatusPresentationTest {
         assertEquals(LiveHeadline.PAUSED, LiveStatusPresentationPolicy.evaluate(LiveProtectionState(status = LiveSessionStatus.PAUSED)).headline)
         assertEquals(LiveHeadline.AUDIO_UNAVAILABLE, LiveStatusPresentationPolicy.evaluate(LiveProtectionState(status = LiveSessionStatus.AUDIO_BLOCKED)).headline)
     }
+
+    @Test fun `permission denial never appears as monitoring`() {
+        val state = LiveProtectionState(
+            status = LiveSessionStatus.PERMISSION_REQUIRED,
+            qualityExplanation = "Microphone permission is required only while Live Protection is running.",
+        )
+        val presentation = LiveStatusPresentationPolicy.evaluate(state)
+        assertEquals(LiveHeadline.AUDIO_UNAVAILABLE, presentation.headline)
+        assertEquals(state.qualityExplanation, presentation.reason)
+    }
 }

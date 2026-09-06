@@ -90,7 +90,10 @@ class LiveProtectionService : Service() {
             this,
             NOTIFICATION_ID,
             notification("Starting Live Protection", paused = false, alert = false),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                ForegroundServiceApiPolicy.supportsMicrophoneType(Build.VERSION.SDK_INT)
+            ) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
         )
         stopping = false; paused = false; totalPausedMs = 0L; sessionStartedAt = SystemClock.elapsedRealtime()
         val audioSource = LiveAudioSourceProvider.create(applicationContext)
@@ -369,6 +372,11 @@ class LiveProtectionService : Service() {
         private const val NOTIFICATION_ID = 3107
         const val ALERT_TEXT = "Suspicious conversation patterns were detected. This is a warning, not proof. Do not share OTPs, PINs, passwords or payment details. Verify the caller through an official number."
     }
+}
+
+/** Keeps the API boundary testable without starting an Android service. */
+object ForegroundServiceApiPolicy {
+    fun supportsMicrophoneType(sdkInt: Int): Boolean = sdkInt >= Build.VERSION_CODES.R
 }
 
 private fun LiveSessionStatus.notificationText() = when (this) {
